@@ -1,7 +1,7 @@
 import json
 import traceback
 from datetime import datetime, timezone
-from kafka import KafkaConsumer
+from kafka import errors
 from pydantic import ValidationError
 from app.utils.config import Config
 from app.utils.logger import get_logger
@@ -11,21 +11,44 @@ from app.models.kafka_event import EtlCompletedEvent, UtmAggregateCompletedEvent
 from app.services.aggregate_runner import AggregateRunner
 from app.producers.kafka_producer import ProducerService
 
+import time
+from kafka import KafkaConsumer
+
 logger = get_logger(__name__)
 
 class ConsumerService:
     def __init__(self):
         self.topic = Config.KAFKA_TOPIC
         self.group_id = Config.KAFKA_CONSUMER_GROUP
-        self.consumer = KafkaConsumer(
-            self.topic,
-            bootstrap_servers=[Config.KAFKA_BROKER],
-            group_id=self.group_id,
-            auto_offset_reset='earliest',
-            enable_auto_commit=False, # Manual offset commits only!
-            value_deserializer=lambda m: json.loads(m.decode('utf-8'))
-        )
+        self.consumer = self._connect_consumer()
         self.producer_service = ProducerService()
+
+    def _connect_consumer(self):
+        attempts = 0
+        max_attempts = 10
+        while attempts < max_attempts:
+            try:
+                attempts += 1
+                logger.info(f"Connecting to Kafka broker at {Config.KAFKA_BROKER} (Attempt {attempts}/{max_attempts})...")
+                consumer = KafkaConsumer(
+                    self.topic,
+                    bootstrap_servers=[Config.KAFKA_BROKER],
+                    group_id=self.group_id,
+                    auto_offset_reset='earliest',
+                    enable_auto_commit=False,
+                    value_deserializer=lambda m: json.loads(m.decode('utf-8'))
+                )
+                logger.info("Successfully connected to Kafka.")
+                return consumer
+            except errors.NoBrokersAvailable:
+                if attempts == max_attempts:
+                    logger.error("Could not connect to Kafka after multiple attempts.")
+                    raise
+                logger.warning("Kafka broker not available, retrying in 5 seconds...")
+                time.sleep(5)
+            except Exception as e:
+                logger.error(f"Unexpected error while connecting to Kafka: {e}")
+                raise e
 
     def _get_current_utc(self):
         return datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')

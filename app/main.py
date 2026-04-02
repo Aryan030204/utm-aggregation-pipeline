@@ -1,6 +1,8 @@
 import sys
 import signal
+import time
 from kafka.admin import KafkaAdminClient, NewTopic
+from kafka import errors
 from app.utils.logger import get_logger
 from app.utils.config import Config
 from app.consumers.kafka_consumer import ConsumerService
@@ -9,24 +11,41 @@ logger = get_logger(__name__)
 
 def ensure_kafka_topic_exists():
     topic_name = Config.KAFKA_TOPIC
-    try:
-        admin_client = KafkaAdminClient(
-            bootstrap_servers=[Config.KAFKA_BROKER],
-            client_id='utm-aggregate-admin'
-        )
-        existing_topics = admin_client.list_topics()
-        if topic_name not in existing_topics:
-            logger.info(f"Kafka topic '{topic_name}' does not exist. Creating it now...")
-            topic = NewTopic(name=topic_name, num_partitions=1, replication_factor=1)
-            admin_client.create_topics(new_topics=[topic], validate_only=False)
-            logger.info(f"Topic '{topic_name}' successfully created.")
-        else:
-            logger.info(f"Kafka topic '{topic_name}' confirmed existing.")
-        admin_client.close()
-    except Exception as e:
-        logger.error(f"Error checking or creating Kafka topic '{topic_name}': {e}")
-        # Note: If broker is down or unreachable this throws an error, 
-        # but we allow the consumer loop to try connecting natively afterwards.
+    attempts = 0
+    max_attempts = 5
+    
+    while attempts < max_attempts:
+        admin_client = None
+        try:
+            attempts += 1
+            logger.info(f"Checking Kafka topic '{topic_name}' (Attempt {attempts}/{max_attempts})...")
+            admin_client = KafkaAdminClient(
+                bootstrap_servers=[Config.KAFKA_BROKER],
+                client_id='utm-aggregate-admin'
+            )
+            existing_topics = admin_client.list_topics()
+            if topic_name not in existing_topics:
+                logger.info(f"Kafka topic '{topic_name}' does not exist. Creating it now...")
+                topic = NewTopic(name=topic_name, num_partitions=1, replication_factor=1)
+                admin_client.create_topics(new_topics=[topic], validate_only=False)
+                logger.info(f"Topic '{topic_name}' successfully created.")
+            else:
+                logger.info(f"Kafka topic '{topic_name}' confirmed existing.")
+            
+            admin_client.close()
+            return # Success
+            
+        except errors.NoBrokersAvailable:
+            if attempts == max_attempts:
+                logger.error(f"Failed to connect to Kafka for topic check after {max_attempts} attempts.")
+                return # We allow the service to continue to the consumer which has its own retry
+            logger.warning("Kafka broker not available for topic check, retrying in 5 seconds...")
+            time.sleep(5)
+        except Exception as e:
+            logger.error(f"Error during Kafka topic check: {e}")
+            if admin_client:
+                admin_client.close()
+            return
 
 def main():
     logger.info("Initializing UTM Aggregate Pipeline Service...")
