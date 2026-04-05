@@ -8,6 +8,8 @@ services:
     env_file:
       - .env
       - .env.local
+    ports:
+      - "8000:8000"
     networks:
       - pipeline-net
 

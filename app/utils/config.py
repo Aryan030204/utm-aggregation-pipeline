@@ -7,9 +7,8 @@ load_dotenv(".env")
 load_dotenv(".env.local")
 
 class Config:
-    KAFKA_BROKER = os.getenv("KAFKA_BROKER", "kafka:9092")
-    KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "pipeline-topic")
-    KAFKA_CONSUMER_GROUP = os.getenv("KAFKA_CONSUMER_GROUP", "utm-aggregate-worker")
+    PORT = int(os.getenv("PORT", "8000"))
+    HOST = os.getenv("HOST", "0.0.0.0")
 
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
     RETRY_ATTEMPTS = int(os.getenv("RETRY_ATTEMPTS", "3"))

@@ -1,7 +1,7 @@
 from pydantic import BaseModel, ConfigDict
 from typing import Optional
 
-class EtlCompletedEvent(BaseModel):
+class EtlTriggerEvent(BaseModel):
     eventType: str
     jobId: str
     completedAt: str
