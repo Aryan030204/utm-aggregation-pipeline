@@ -1,6 +1,22 @@
 from typing import List
 from app.services.payment_classifier import PAYMENT_TYPE_CASE_SQL
 
+METRIC_COLUMNS = [
+    "orders",
+    "sales",
+    "average_order_value",
+    "sessions",
+    "atc_sessions",
+    "conversion_rate",
+    "cancellation_rate",
+    "refund_rate",
+    "prepaid_orders",
+    "cod_orders",
+    "ppcod_orders",
+    "cancelled_orders",
+    "refunded_orders",
+]
+
 def get_dimension_columns(table_name: str, is_hourly: bool = False) -> List[str]:
     parts = table_name.replace('_daily', '').replace('_hourly', '').split('_')[1:]
     columns = ["metric_date"]
@@ -10,20 +26,22 @@ def get_dimension_columns(table_name: str, is_hourly: bool = False) -> List[str]
         columns.append(f"utm_{part}")
     return columns
 
+def get_all_columns(table_name: str, is_hourly: bool = False) -> List[str]:
+    return get_dimension_columns(table_name, is_hourly) + list(METRIC_COLUMNS)
+
 def build_delete_query(table_name: str) -> str:
     return f"DELETE FROM {table_name} WHERE metric_date = %s;"
 
-def build_insert_query(table_name: str, is_hourly: bool = False) -> str:
+def build_select_aggregation_query(table_name: str, is_hourly: bool = False) -> str:
     dims = get_dimension_columns(table_name, is_hourly)
-    dims_csv = ", ".join(dims)
-    
+
     # Selection of sessions table based on granularity
     sessions_table = "hourly_product_sessions" if is_hourly else "product_sessions_snapshot"
-    
+
     order_select_dims = []
     session_select_dims = []
     group_by_dims = []
-    
+
     for d in dims:
         if d == "metric_date":
             # standardizing on 'metric_date' but using original columns
@@ -39,18 +57,12 @@ def build_insert_query(table_name: str, is_hourly: bool = False) -> str:
             order_select_dims.append(f"IFNULL(so.{d}, 'Unknown') AS {d}")
             session_select_dims.append(f"IFNULL({d}, 'Unknown') AS {d}")
             group_by_dims.append(d)
-            
+
     order_select_str = ", ".join(order_select_dims)
     session_select_str = ", ".join(session_select_dims)
     group_by_str = ", ".join(group_by_dims)
 
-    insert_sql = f"""
-    INSERT INTO {table_name} (
-        {dims_csv},
-        orders, sales, average_order_value, sessions, atc_sessions,
-        conversion_rate, cancellation_rate, refund_rate,
-        prepaid_orders, cod_orders, ppcod_orders, cancelled_orders, refunded_orders
-    )
+    select_sql = f"""
     SELECT
         {group_by_str},
         SUM(orders) AS orders,
@@ -113,5 +125,11 @@ def build_insert_query(table_name: str, is_hourly: bool = False) -> str:
     ) combined
     GROUP BY {group_by_str};
     """
-    
-    return insert_sql
+
+    return select_sql
+
+def build_bulk_insert_query(table_name: str, columns: List[str], num_rows: int) -> str:
+    cols_csv = ", ".join(columns)
+    placeholder_group = "(" + ", ".join(["%s"] * len(columns)) + ")"
+    values_csv = ", ".join([placeholder_group] * num_rows)
+    return f"INSERT INTO {table_name} ({cols_csv}) VALUES {values_csv};"
