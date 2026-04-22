@@ -29,3 +29,7 @@ class Config:
     FREE_RUN = os.getenv("FREE_RUN", "false").lower() == "true"
     FREE_RUN_START_DATE = os.getenv("FREE_RUN_START_DATE", "")
     FREE_RUN_END_DATE = os.getenv("FREE_RUN_END_DATE", "")
+
+    # Self Run (internal scheduler)
+    SELF_RUN = os.getenv("SELF_RUN", "true").lower() == "true"
+    PIPELINE_SCHEDULE = os.getenv("PIPELINE_SCHEDULE", "0 * * * *")  # Default: Hourly

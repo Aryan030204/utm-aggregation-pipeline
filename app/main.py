@@ -6,6 +6,9 @@ from app.models.events import EtlTriggerEvent
 from app.services.brand_fetcher import BrandFetcher
 from app.services.aggregate_runner import AggregateRunner
 from app.utils.dates import generate_target_dates
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+from datetime import datetime
 import sys
 
 logger = get_logger(__name__)
@@ -73,6 +76,33 @@ async def trigger_pipeline(
         "jobId": event.jobId
     }
 
+@app.post("/utm-pipeline/manual-trigger")
+async def manual_trigger(
+    background_tasks: BackgroundTasks,
+    x_pipeline_key: str = Header(None)
+):
+    # Verify Authentication Header
+    if x_pipeline_key != Config.PIPELINE_AUTH_HEADER:
+        logger.warning(f"Unauthorized manual trigger attempt with key: {x_pipeline_key}")
+        raise HTTPException(status_code=403, detail="Invalid pipeline key")
+
+    logger.info("Authorized manual trigger received. Dispatching background task.")
+    
+    # Create a manual trigger event
+    event = EtlTriggerEvent(
+        eventType="ETL_COMPLETED",
+        jobId=f"manual_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+        completedAt=datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    )
+    
+    background_tasks.add_task(run_pipeline_task, event)
+
+    return {
+        "status": "success",
+        "message": "Manual pipeline trigger successful.",
+        "jobId": event.jobId
+    }
+
 @app.get("/")
 async def root():
     return {"status": "running", "service": "UTM Aggregation Pipeline"}
@@ -109,6 +139,28 @@ def main():
         sys.exit(0)
     
     # Normal server mode
+    if Config.SELF_RUN:
+        logger.info(f"SELF_RUN is enabled. Starting scheduler with pattern: {Config.PIPELINE_SCHEDULE}")
+        scheduler = BackgroundScheduler()
+        
+        def scheduled_job():
+            logger.info("Executing scheduled pipeline run...")
+            event = EtlTriggerEvent(
+                eventType="ETL_COMPLETED",
+                jobId=f"scheduled_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                completedAt=datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+            )
+            run_pipeline_task(event)
+
+        scheduler.add_job(
+            scheduled_job,
+            CronTrigger.from_crontab(Config.PIPELINE_SCHEDULE),
+            id="utm_pipeline_job"
+        )
+        scheduler.start()
+    else:
+        logger.info("SELF_RUN is disabled. Pipeline will only run via manual triggers.")
+
     uvicorn.run(app, host=Config.HOST, port=Config.PORT)
 
 if __name__ == "__main__":
