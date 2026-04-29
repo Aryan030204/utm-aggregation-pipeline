@@ -3,8 +3,11 @@ from dotenv import load_dotenv
 
 # Load .env first
 load_dotenv(".env")
-# Then load .env.local to override/supplement variables
-load_dotenv(".env.local")
+
+# Only load .env.local for TEST_MODE to avoid overriding production values.
+_test_mode = os.getenv("TEST_MODE", "false").lower() == "true"
+if _test_mode:
+    load_dotenv(".env.local")
 
 class Config:
     PORT = int(os.getenv("PORT", "8000"))
@@ -33,3 +36,8 @@ class Config:
     # Self Run (internal scheduler)
     SELF_RUN = os.getenv("SELF_RUN", "true").lower() == "true"
     PIPELINE_SCHEDULE = os.getenv("PIPELINE_SCHEDULE", "0 * * * *")  # Default: Hourly
+
+    # Manager Endpoints
+    MANAGER_STARTED_ENDPOINT = os.getenv("MANAGER_STARTED_ENDPOINT", "")
+    MANAGER_COMPLETED_ENDPOINT = os.getenv("MANAGER_COMPLETED_ENDPOINT", "")
+    PIPELINE_ID = os.getenv("PIPELINE_ID", "")

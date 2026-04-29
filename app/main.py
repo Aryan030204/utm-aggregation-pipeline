@@ -10,16 +10,36 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from datetime import datetime
 import sys
+import uuid
+import requests
 
 logger = get_logger(__name__)
 
 app = FastAPI(title="UTM Aggregate Pipeline Trigger API")
 
-def run_pipeline_task(event: EtlTriggerEvent):
+def run_pipeline_task(event: EtlTriggerEvent, is_manual: bool = False):
     """
     Background task to execute the pipeline for all brands.
     """
+    run_id = None
     try:
+        if is_manual:
+            run_id = str(uuid.uuid4())
+            try:
+                requests.post(
+                    Config.MANAGER_STARTED_ENDPOINT,
+                    json={
+                        "runId": run_id,
+                        "pipelineId": Config.PIPELINE_ID,
+                        "status": "running"
+                    },
+                    headers={"x-pipeline-key": Config.PIPELINE_AUTH_HEADER},
+                    timeout=10
+                )
+                logger.info(f"Sent started status to manager for runId: {run_id}")
+            except Exception as e:
+                logger.error(f"Failed to send started status to manager: {e}")
+
         logger.info(f"Background process started for jobId: {event.jobId}")
         
         # Setup dates
@@ -47,6 +67,22 @@ def run_pipeline_task(event: EtlTriggerEvent):
         logger.info(f"Pipeline execution completed for jobId: {event.jobId}")
     except Exception as e:
         logger.error(f"Fatal error in background pipeline execution: {e}")
+    finally:
+        if is_manual and run_id:
+            try:
+                requests.post(
+                    Config.MANAGER_COMPLETED_ENDPOINT,
+                    json={
+                        "runId": run_id,
+                        "pipelineId": Config.PIPELINE_ID,
+                        "status": "completed"
+                    },
+                    headers={"x-pipeline-key": Config.PIPELINE_AUTH_HEADER},
+                    timeout=10
+                )
+                logger.info(f"Sent completed status to manager for runId: {run_id}")
+            except Exception as e:
+                logger.error(f"Failed to send completed status to manager: {e}")
 
 @app.post("/utm-pipeline/trigger")
 async def trigger_pipeline(
@@ -95,7 +131,7 @@ async def manual_trigger(
         completedAt=datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
     )
     
-    background_tasks.add_task(run_pipeline_task, event)
+    background_tasks.add_task(run_pipeline_task, event, is_manual=True)
 
     return {
         "status": "success",
