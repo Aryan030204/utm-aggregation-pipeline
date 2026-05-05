@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional
 
 class EtlTriggerEvent(BaseModel):
@@ -6,6 +6,11 @@ class EtlTriggerEvent(BaseModel):
     jobId: str
     completedAt: str
     recomputeDays: Optional[int] = 1
+
+    model_config = ConfigDict(extra='ignore')
+
+class ManualTriggerRequest(BaseModel):
+    runId: str = Field(min_length=1)
 
     model_config = ConfigDict(extra='ignore')
 

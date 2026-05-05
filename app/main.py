@@ -1,8 +1,8 @@
 import uvicorn
 from fastapi import FastAPI, Header, HTTPException, BackgroundTasks
-from app.utils.logger import get_logger
+from app.utils.logger import get_logger, get_recent_logs
 from app.utils.config import Config
-from app.models.events import EtlTriggerEvent
+from app.models.events import EtlTriggerEvent, ManualTriggerRequest
 from app.services.brand_fetcher import BrandFetcher
 from app.services.aggregate_runner import AggregateRunner
 from app.utils.dates import generate_target_dates
@@ -10,21 +10,30 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from datetime import datetime
 import sys
-import uuid
 import requests
+import re
 
 logger = get_logger(__name__)
 
 app = FastAPI(title="UTM Aggregate Pipeline Trigger API")
 
-def run_pipeline_task(event: EtlTriggerEvent, is_manual: bool = False):
+class PipelineInitializationError(Exception):
+    pass
+
+
+def _exception_to_error_code(exc: Exception) -> str:
+    name = exc.__class__.__name__ or "UnknownError"
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", name).upper()
+
+
+def run_pipeline_task(event: EtlTriggerEvent, is_manual: bool = False, run_id: str | None = None):
     """
     Background task to execute the pipeline for all brands.
     """
-    run_id = None
+    run_failed = False
+    failure_exception = None
     try:
         if is_manual:
-            run_id = str(uuid.uuid4())
             try:
                 requests.post(
                     Config.MANAGER_STARTED_ENDPOINT,
@@ -44,12 +53,13 @@ def run_pipeline_task(event: EtlTriggerEvent, is_manual: bool = False):
         
         # Setup dates
         target_dates = generate_target_dates(event.completedAt)
+        if not target_dates:
+            raise PipelineInitializationError("No target dates generated")
         
         # Fetch all valid brands
         brands = BrandFetcher.get_all_brands()
         if not brands:
-            logger.warning("No brands fetched. Pipeline execution stopped.")
-            return
+            raise PipelineInitializationError("No brands fetched")
             
         # Execute pipeline for every brand
         for b in brands:
@@ -62,27 +72,50 @@ def run_pipeline_task(event: EtlTriggerEvent, is_manual: bool = False):
                 runner.run_aggregations()
                 
             except Exception as run_e:
+                run_failed = True
+                if failure_exception is None:
+                    failure_exception = run_e
                 logger.error(f"Failed processing brand {b.get('brand_name')}: {run_e}")
 
         logger.info(f"Pipeline execution completed for jobId: {event.jobId}")
     except Exception as e:
+        run_failed = True
+        failure_exception = e
         logger.error(f"Fatal error in background pipeline execution: {e}")
     finally:
         if is_manual and run_id:
             try:
-                requests.post(
-                    Config.MANAGER_COMPLETED_ENDPOINT,
-                    json={
-                        "runId": run_id,
-                        "pipelineId": Config.PIPELINE_ID,
-                        "status": "completed"
-                    },
-                    headers={"x-pipeline-key": Config.PIPELINE_AUTH_HEADER},
-                    timeout=10
-                )
-                logger.info(f"Sent completed status to manager for runId: {run_id}")
+                if run_failed:
+                    error_code = "UNKNOWN_ERROR"
+                    if failure_exception is not None:
+                        error_code = _exception_to_error_code(failure_exception)
+                    error_body = "\n".join(get_recent_logs(2))
+                    requests.post(
+                        Config.MANAGER_FAILED_ENDPOINT,
+                        json={
+                            "runId": run_id,
+                            "pipelineId": Config.PIPELINE_ID,
+                            "errorCode": error_code,
+                            "errorBody": error_body
+                        },
+                        headers={"x-pipeline-key": Config.PIPELINE_AUTH_HEADER},
+                        timeout=10
+                    )
+                    logger.info(f"Sent failed status to manager for runId: {run_id}")
+                else:
+                    requests.post(
+                        Config.MANAGER_COMPLETED_ENDPOINT,
+                        json={
+                            "runId": run_id,
+                            "pipelineId": Config.PIPELINE_ID,
+                            "status": "completed"
+                        },
+                        headers={"x-pipeline-key": Config.PIPELINE_AUTH_HEADER},
+                        timeout=10
+                    )
+                    logger.info(f"Sent completed status to manager for runId: {run_id}")
             except Exception as e:
-                logger.error(f"Failed to send completed status to manager: {e}")
+                logger.error(f"Failed to send status to manager: {e}")
 
 @app.post("/utm-pipeline/trigger")
 async def trigger_pipeline(
@@ -114,6 +147,7 @@ async def trigger_pipeline(
 
 @app.post("/utm-pipeline/manual-trigger")
 async def manual_trigger(
+    request: ManualTriggerRequest,
     background_tasks: BackgroundTasks,
     x_pipeline_key: str = Header(None)
 ):
@@ -131,12 +165,13 @@ async def manual_trigger(
         completedAt=datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
     )
     
-    background_tasks.add_task(run_pipeline_task, event, is_manual=True)
+    background_tasks.add_task(run_pipeline_task, event, is_manual=True, run_id=request.runId)
 
     return {
         "status": "success",
         "message": "Manual pipeline trigger successful.",
-        "jobId": event.jobId
+        "jobId": event.jobId,
+        "runId": request.runId
     }
 
 @app.get("/")

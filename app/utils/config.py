@@ -40,4 +40,5 @@ class Config:
     # Manager Endpoints
     MANAGER_STARTED_ENDPOINT = os.getenv("MANAGER_STARTED_ENDPOINT", "")
     MANAGER_COMPLETED_ENDPOINT = os.getenv("MANAGER_COMPLETED_ENDPOINT", "")
+    MANAGER_FAILED_ENDPOINT = os.getenv("MANAGER_FAILED_ENDPOINT", "")
     PIPELINE_ID = os.getenv("PIPELINE_ID", "")
