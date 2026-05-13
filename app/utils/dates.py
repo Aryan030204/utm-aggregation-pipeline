@@ -4,14 +4,25 @@ from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-def generate_target_dates(completed_at: str) -> list[str]:
+def generate_target_dates(completed_at: str, recompute_days: int = 2) -> list[str]:
     """
     Returns a list of 'YYYY-MM-DD' strings.
-    If BACKFILL_MODE is false, returns the single date extracted from completed_at.
+    If BACKFILL_MODE is false, returns a rolling window ending on completed_at.
     If BACKFILL_MODE is true, generates a range from BACKFILL_START_IST to BACKFILL_END_IST.
     """
     if not Config.BACKFILL_MODE:
-        return [completed_at.split('T')[0]]
+        end_date = datetime.strptime(completed_at.split('T')[0], "%Y-%m-%d")
+        days = max(1, recompute_days)
+        start_date = end_date - timedelta(days=days - 1)
+
+        dates = []
+        current = start_date
+        while current <= end_date:
+            dates.append(current.strftime("%Y-%m-%d"))
+            current += timedelta(days=1)
+
+        logger.info(f"Generated {len(dates)} target dates from {start_date.date()} to {end_date.date()}.")
+        return dates
 
     try:
         # Expected format: "2026-01-26T00:00:00"
@@ -28,8 +39,8 @@ def generate_target_dates(completed_at: str) -> list[str]:
         return dates
     except Exception as e:
         logger.error(f"Failed to generate backfill dates: {e}")
-        # fallback to single date
-        return [completed_at.split('T')[0]]
+        # fallback to normal rolling window
+        return generate_target_dates(completed_at, recompute_days)
 
 def generate_free_run_dates() -> list[str]:
     """

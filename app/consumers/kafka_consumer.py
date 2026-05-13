@@ -68,7 +68,7 @@ class ConsumerService:
                 logger.info(f"Processing ETL completed event. jobId: {event.jobId}")
                 
                 # Setup dates
-                target_dates = generate_target_dates(event.completedAt)
+                target_dates = generate_target_dates(event.completedAt, event.recomputeDays or 2)
                 
                 # Fetch all valid brands
                 brands = BrandFetcher.get_all_brands()

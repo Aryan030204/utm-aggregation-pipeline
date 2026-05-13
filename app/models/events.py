@@ -5,7 +5,7 @@ class EtlTriggerEvent(BaseModel):
     eventType: str
     jobId: str
     completedAt: str
-    recomputeDays: Optional[int] = 1
+    recomputeDays: Optional[int] = 2
 
     model_config = ConfigDict(extra='ignore')
 
