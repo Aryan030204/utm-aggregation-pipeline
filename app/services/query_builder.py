@@ -1,7 +1,7 @@
 from typing import List
 from app.services.payment_classifier import PAYMENT_TYPE_CASE_SQL
 
-METRIC_COLUMNS = [=
+METRIC_COLUMNS = [
     "orders",
     "sales",
     "average_order_value",
