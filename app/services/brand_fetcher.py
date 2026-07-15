@@ -43,28 +43,28 @@ class BrandFetcher:
             logger.info(f"TEST_MODE is false. Fetching from API: {Config.GET_BRANDS_API}")
             brands = BrandFetcher._get_brands_from_api()
 
-        return BrandFetcher._filter_backfill_brands(brands)
+        return BrandFetcher._filter_backfill_brand_indices(brands)
 
     @staticmethod
-    def _filter_backfill_brands(brands: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        if not Config.BACKFILL_MODE or not Config.BACKFILL_BRANDS:
+    def _filter_backfill_brand_indices(brands: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if not Config.BACKFILL_MODE or not Config.BACKFILL_BRAND_INDICES:
             return brands
 
-        selected_brands = {
-            brand.strip().lower()
-            for brand in Config.BACKFILL_BRANDS.split(',')
-            if brand.strip()
+        selected_brand_ids = {
+            brand_id.strip()
+            for brand_id in Config.BACKFILL_BRAND_INDICES.split(',')
+            if brand_id.strip()
         }
-        if not selected_brands:
+        if not selected_brand_ids:
             return brands
 
         filtered_brands = [
             brand for brand in brands
-            if brand.get("brand_name", "").strip().lower() in selected_brands
+            if str(brand.get("brand_id", "")).strip() in selected_brand_ids
         ]
         logger.info(
-            f"Backfill brand filter active. Selected {len(filtered_brands)}/{len(brands)} brands: "
-            f"{', '.join(sorted(selected_brands))}"
+            f"Backfill brand index filter active. Selected {len(filtered_brands)}/{len(brands)} brands: "
+            f"{', '.join(sorted(selected_brand_ids))}"
         )
         return filtered_brands
 
@@ -87,6 +87,7 @@ class BrandFetcher:
                 continue
                 
             brands.append({
+                "brand_id": brand_id,
                 "brand_name": os.getenv(f"BRAND_NAME_{i}", f"brand_{i}"),
                 "host": os.getenv(f"DB_HOST_{i}", "localhost"),
                 "user": os.getenv(f"DB_USER_{i}", "root"),
@@ -120,6 +121,7 @@ class BrandFetcher:
                     decrypted_pw = decrypt_password(data.get("db_password", ""))
                     
                     brands_data_list.append({
+                        "brand_id": str(brand_id_str),
                         "brand_name": data.get("brand_name", brand_name),
                         "host": data.get("db_host", "localhost"),
                         "user": data.get("db_user", "root"),

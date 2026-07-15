@@ -58,8 +58,10 @@ def build_select_aggregation_query(table_name: str, is_hourly: bool = False) -> 
             if d == "utm_source":
                 session_select_dims.append(
                     "CASE "
+                    f"WHEN LOWER(TRIM(COALESCE({d}, ''))) = 'direct' THEN 'direct' "
                     "WHEN LOWER(COALESCE(referrer_name, '')) = 'direct' THEN 'direct' "
-                    f"ELSE IFNULL({d}, 'Unknown') END AS {d}"
+                    f"WHEN LOWER(TRIM(COALESCE({d}, ''))) IN ('', 'unknown') THEN 'direct' "
+                    f"ELSE {d} END AS {d}"
                 )
             else:
                 session_select_dims.append(f"IFNULL({d}, 'Unknown') AS {d}")

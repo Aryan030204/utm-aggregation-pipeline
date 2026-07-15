@@ -27,7 +27,7 @@ class Config:
     BACKFILL_MODE = os.getenv("BACKFILL_MODE", "false").lower() == "true"
     BACKFILL_START_IST = os.getenv("BACKFILL_START_IST", "")
     BACKFILL_END_IST = os.getenv("BACKFILL_END_IST", "")
-    BACKFILL_BRANDS = os.getenv("BACKFILL_BRANDS", "")
+    BACKFILL_BRAND_INDICES = os.getenv("BACKFILL_BRAND_INDICES", "")
 
     # Free Run (runs autonomously without Kafka)
     FREE_RUN = os.getenv("FREE_RUN", "false").lower() == "true"
