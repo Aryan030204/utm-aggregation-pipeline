@@ -55,7 +55,14 @@ def build_select_aggregation_query(table_name: str, is_hourly: bool = False) -> 
         else:
             # utm_source, utm_medium, etc.
             order_select_dims.append(f"IFNULL(so.{d}, 'Unknown') AS {d}")
-            session_select_dims.append(f"IFNULL({d}, 'Unknown') AS {d}")
+            if d == "utm_source":
+                session_select_dims.append(
+                    "CASE "
+                    "WHEN LOWER(COALESCE(referrer_name, '')) = 'direct' THEN 'direct' "
+                    f"ELSE IFNULL({d}, 'Unknown') END AS {d}"
+                )
+            else:
+                session_select_dims.append(f"IFNULL({d}, 'Unknown') AS {d}")
             group_by_dims.append(d)
 
     order_select_str = ", ".join(order_select_dims)
