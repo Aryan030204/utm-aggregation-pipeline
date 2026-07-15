@@ -52,7 +52,7 @@ def run_pipeline_task(event: EtlTriggerEvent, is_manual: bool = False, run_id: s
         logger.info(f"Background process started for jobId: {event.jobId}")
         
         # Setup dates
-        target_dates = generate_target_dates(event.completedAt)
+        target_dates = generate_target_dates(event.completedAt, event.recomputeDays or 2)
         if not target_dates:
             raise PipelineInitializationError("No target dates generated")
         

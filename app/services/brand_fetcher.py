@@ -38,10 +38,35 @@ class BrandFetcher:
         """
         if Config.TEST_MODE:
             logger.info("TEST_MODE is true. Fetching credentials from .env.local variables.")
-            return BrandFetcher._get_brands_from_env()
+            brands = BrandFetcher._get_brands_from_env()
         else:
             logger.info(f"TEST_MODE is false. Fetching from API: {Config.GET_BRANDS_API}")
-            return BrandFetcher._get_brands_from_api()
+            brands = BrandFetcher._get_brands_from_api()
+
+        return BrandFetcher._filter_backfill_brands(brands)
+
+    @staticmethod
+    def _filter_backfill_brands(brands: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if not Config.BACKFILL_MODE or not Config.BACKFILL_BRANDS:
+            return brands
+
+        selected_brands = {
+            brand.strip().lower()
+            for brand in Config.BACKFILL_BRANDS.split(',')
+            if brand.strip()
+        }
+        if not selected_brands:
+            return brands
+
+        filtered_brands = [
+            brand for brand in brands
+            if brand.get("brand_name", "").strip().lower() in selected_brands
+        ]
+        logger.info(
+            f"Backfill brand filter active. Selected {len(filtered_brands)}/{len(brands)} brands: "
+            f"{', '.join(sorted(selected_brands))}"
+        )
+        return filtered_brands
 
     @staticmethod
     def _get_brands_from_env() -> List[Dict[str, Any]]:
