@@ -69,6 +69,10 @@ class BrandFetcher:
         return filtered_brands
 
     @staticmethod
+    def _is_api_brand_active(brand_data: Dict[str, Any]) -> bool:
+        return brand_data.get("is_active") is True
+
+    @staticmethod
     def _get_brands_from_env() -> List[Dict[str, Any]]:
         brands = []
         if not Config.ACTIVE_BRAND_IDS:
@@ -117,6 +121,13 @@ class BrandFetcher:
                     brand_resp = requests.get(f"{Config.GET_BRANDS_API}/{brand_id_str}", headers=headers, timeout=10)
                     brand_resp.raise_for_status()
                     data = brand_resp.json()
+
+                    if not BrandFetcher._is_api_brand_active(data):
+                        resolved_name = data.get("brand_name", brand_name)
+                        logger.info(
+                            f"Skipping brand_id {brand_id_str} ({resolved_name}) because is_active is not true."
+                        )
+                        continue
                     
                     decrypted_pw = decrypt_password(data.get("db_password", ""))
                     
