@@ -86,4 +86,9 @@ class MergeService:
             return value.date().isoformat()
         if isinstance(value, date):
             return value.isoformat()
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped.isdigit():
+                return int(stripped)
+            return stripped
         return value

@@ -67,3 +67,37 @@ class MergeServiceTests(unittest.TestCase):
         self.assertEqual(len(merged), 1)
         self.assertEqual(merged[0]["date"], "2026-07-28")
         self.assertEqual(merged[0]["orders"], 2)
+
+    def test_merge_normalizes_numeric_string_dimensions(self):
+        sessions = [
+            {
+                "date": "2026-07-28",
+                "hour": "7",
+                "product_id": "101",
+                "utm_source": "google",
+                "sessions": 4,
+                "atc_sessions": 1,
+            }
+        ]
+        orders = [
+            {
+                "date": "2026-07-28",
+                "hour": 7,
+                "product_id": 101,
+                "utm_source": "google",
+                "orders": 1,
+                "sales": "20.00",
+                "cod_orders": 0,
+                "prepaid_orders": 1,
+                "partially_prepaid_orders": 0,
+                "cancelled_orders": 0,
+                "refunded_orders": 0,
+            }
+        ]
+
+        merged = MergeService.merge_hourly(sessions, orders)
+
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["hour"], 7)
+        self.assertEqual(merged[0]["product_id"], 101)
+        self.assertEqual(merged[0]["orders"], 1)
