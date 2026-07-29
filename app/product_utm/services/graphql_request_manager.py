@@ -82,7 +82,7 @@ class GraphQLRequestManager:
 
     def _perform_request(self, shopifyql_query: str) -> dict[str, Any]:
         response = requests.post(
-            f"https://{self.brand.shop_name}/admin/api/{self.brand.api_version}/graphql.json",
+            f"https://{self.brand.shop_name}.myshopify.com/admin/api/{self.brand.api_version}/graphql.json",
             headers={
                 "Content-Type": "application/json",
                 "X-Shopify-Access-Token": self.brand.access_token,
