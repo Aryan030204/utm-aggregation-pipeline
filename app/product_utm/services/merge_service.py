@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, datetime
 from decimal import Decimal, ROUND_HALF_UP
 
 
@@ -20,9 +21,10 @@ class MergeService:
         merged: dict[tuple, dict] = {}
 
         for row in session_rows:
-            key = tuple(row[field] for field in key_fields)
+            normalized_dimensions = cls._normalized_dimensions(row, key_fields)
+            key = tuple(normalized_dimensions[field] for field in key_fields)
             merged[key] = {
-                **{field: row[field] for field in key_fields},
+                **normalized_dimensions,
                 "sessions": int(row.get("sessions", 0) or 0),
                 "atc_sessions": int(row.get("atc_sessions", 0) or 0),
                 "orders": 0,
@@ -36,11 +38,12 @@ class MergeService:
             }
 
         for row in order_rows:
-            key = tuple(row[field] for field in key_fields)
+            normalized_dimensions = cls._normalized_dimensions(row, key_fields)
+            key = tuple(normalized_dimensions[field] for field in key_fields)
             target = merged.setdefault(
                 key,
                 {
-                    **{field: row[field] for field in key_fields},
+                    **normalized_dimensions,
                     "sessions": 0,
                     "atc_sessions": 0,
                     "orders": 0,
@@ -72,3 +75,15 @@ class MergeService:
             row["sales"] = sales.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
         return sorted(merged.values(), key=lambda row: tuple(row[field] for field in key_fields))
+
+    @classmethod
+    def _normalized_dimensions(cls, row: dict, key_fields: tuple[str, ...]) -> dict[str, object]:
+        return {field: cls._normalize_key_value(row.get(field)) for field in key_fields}
+
+    @staticmethod
+    def _normalize_key_value(value: object) -> object:
+        if isinstance(value, datetime):
+            return value.date().isoformat()
+        if isinstance(value, date):
+            return value.isoformat()
+        return value

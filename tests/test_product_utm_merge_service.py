@@ -1,4 +1,5 @@
 import unittest
+from datetime import date
 
 from app.product_utm.services.merge_service import MergeService
 
@@ -35,3 +36,34 @@ class MergeServiceTests(unittest.TestCase):
         self.assertEqual(merged[0]["sessions"], 10)
         self.assertEqual(merged[1]["orders"], 3)
         self.assertEqual(str(merged[1]["average_order_value"]), "33.30")
+
+    def test_merge_normalizes_date_objects_from_order_rows(self):
+        sessions = [
+            {
+                "date": "2026-07-28",
+                "product_id": 1,
+                "utm_source": "google",
+                "sessions": 10,
+                "atc_sessions": 2,
+            }
+        ]
+        orders = [
+            {
+                "date": date(2026, 7, 28),
+                "product_id": 1,
+                "utm_source": "google",
+                "orders": 2,
+                "sales": "40.00",
+                "cod_orders": 0,
+                "prepaid_orders": 2,
+                "partially_prepaid_orders": 0,
+                "cancelled_orders": 0,
+                "refunded_orders": 0,
+            }
+        ]
+
+        merged = MergeService.merge_daily(sessions, orders)
+
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["date"], "2026-07-28")
+        self.assertEqual(merged[0]["orders"], 2)
