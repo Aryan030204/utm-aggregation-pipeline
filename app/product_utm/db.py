@@ -48,16 +48,18 @@ class ProductUTMDBClient:
         finally:
             cursor.close()
 
-    def execute(self, query: str, params: tuple[Any, ...] | None = None) -> int:
+    def execute(self, query: str, params: tuple[Any, ...] | None = None, commit: bool = False) -> int:
         connection = self.connect()
         cursor = connection.cursor()
         try:
             cursor.execute(query, params)
+            if commit:
+                connection.commit()
             return cursor.rowcount
         finally:
             cursor.close()
 
-    def execute_many(self, query: str, rows: Iterable[tuple[Any, ...]]) -> int:
+    def execute_many(self, query: str, rows: Iterable[tuple[Any, ...]], commit: bool = False) -> int:
         connection = self.connect()
         cursor = connection.cursor()
         try:
@@ -65,6 +67,8 @@ class ProductUTMDBClient:
             if not row_list:
                 return 0
             cursor.executemany(query, row_list)
+            if commit:
+                connection.commit()
             return cursor.rowcount
         finally:
             cursor.close()

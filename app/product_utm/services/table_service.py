@@ -23,8 +23,8 @@ class TableService:
         self.brand_name = brand_name
 
     def ensure_tables_exist(self):
-        self.db_client.execute(load_query_file("create_product_utm_daily.sql"))
-        self.db_client.execute(load_query_file("create_product_utm_hourly.sql"))
+        self.db_client.execute(load_query_file("create_product_utm_daily.sql"), commit=True)
+        self.db_client.execute(load_query_file("create_product_utm_hourly.sql"), commit=True)
 
     def write_daily_rows(self, start_date: date, end_date: date, rows: list[dict]) -> tuple[int, int]:
         return self._write_rows(
