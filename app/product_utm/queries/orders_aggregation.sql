@@ -35,7 +35,8 @@ FROM (
         FROM returns_fact
         GROUP BY order_id
     ) r ON so.order_id = r.order_id
-    WHERE DATE(COALESCE(CONVERT_TZ(created_at, '+00:00', %s), created_at)) BETWEEN %s AND %s
+    WHERE so.created_at >= %s
+      AND so.created_at < %s
       AND product_id IN ({product_placeholders})
 ) scoped_orders
 GROUP BY {group_by_prefix}, product_id, utm_source

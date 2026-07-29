@@ -110,10 +110,13 @@ class ProductUTMWorkerService:
             metrics.total_session_rows += summary.session_rows
 
             summary.stage = "Fetching Orders"
-            daily_order_rows = orders_repository.fetch_daily_aggregates(daily_start, daily_end, product_ids, brand.store_timezone)
-            hourly_order_rows = []
-            if self.run_type == "daily":
-                hourly_order_rows = orders_repository.fetch_hourly_aggregates(hourly_start, hourly_end, product_ids, brand.store_timezone)
+            hourly_order_rows = orders_repository.fetch_hourly_aggregates(
+                daily_start,
+                daily_end,
+                product_ids,
+                brand.store_timezone,
+            )
+            daily_order_rows = orders_repository.derive_daily_aggregates(hourly_order_rows)
             summary.order_rows = len(daily_order_rows) + len(hourly_order_rows)
             metrics.total_order_rows += summary.order_rows
 

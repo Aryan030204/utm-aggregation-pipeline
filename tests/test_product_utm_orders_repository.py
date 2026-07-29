@@ -16,16 +16,59 @@ class FakeDBClient:
 
 
 class OrdersRepositoryTests(unittest.TestCase):
-    def test_daily_query_groups_only_by_utm_source(self):
+    def test_hourly_query_uses_sargable_utc_window(self):
         client = FakeDBClient()
         repository = OrdersRepository(client)
 
-        repository.fetch_daily_aggregates(date(2026, 7, 27), date(2026, 7, 28), [1, 2, 3], "Asia/Kolkata")
+        repository.fetch_hourly_aggregates(date(2026, 7, 27), date(2026, 7, 28), [1, 2, 3], "(GMT+05:30) Asia/Kolkata")
 
         self.assertIn("COALESCE(NULLIF(TRIM(utm_source), ''), 'Unknown') AS utm_source", client.query)
         self.assertIn("DATE(local_created_at) AS date", client.query)
         self.assertIn("CONVERT_TZ(created_at, '+00:00', %s)", client.query)
-        self.assertIn("GROUP BY date, product_id, utm_source", client.query)
+        self.assertIn("so.created_at >= %s", client.query)
+        self.assertIn("so.created_at < %s", client.query)
+        self.assertIn("GROUP BY date, hour, product_id, utm_source", client.query)
+        self.assertNotIn("DATE(COALESCE(CONVERT_TZ(created_at", client.query)
         self.assertNotIn("utm_medium", client.query)
         self.assertNotIn("utm_campaign", client.query)
-        self.assertEqual(client.params, ("Asia/Kolkata", "Asia/Kolkata", "2026-07-27", "2026-07-28", 1, 2, 3))
+        self.assertEqual(client.params, ("Asia/Kolkata", "2026-07-26 18:30:00", "2026-07-28 18:30:00", 1, 2, 3))
+
+    def test_daily_aggregates_are_derived_from_hourly_rows(self):
+        repository = OrdersRepository(FakeDBClient())
+
+        daily_rows = repository.derive_daily_aggregates(
+            [
+                {
+                    "date": "2026-07-29",
+                    "hour": 10,
+                    "product_id": 101,
+                    "utm_source": "google",
+                    "orders": 2,
+                    "sales": "30.00",
+                    "cod_orders": 1,
+                    "prepaid_orders": 1,
+                    "partially_prepaid_orders": 0,
+                    "cancelled_orders": 0,
+                    "refunded_orders": 0,
+                },
+                {
+                    "date": "2026-07-29",
+                    "hour": 11,
+                    "product_id": 101,
+                    "utm_source": "google",
+                    "orders": 1,
+                    "sales": "15.00",
+                    "cod_orders": 0,
+                    "prepaid_orders": 1,
+                    "partially_prepaid_orders": 0,
+                    "cancelled_orders": 1,
+                    "refunded_orders": 0,
+                },
+            ]
+        )
+
+        self.assertEqual(len(daily_rows), 1)
+        self.assertEqual(daily_rows[0]["orders"], 3)
+        self.assertEqual(str(daily_rows[0]["sales"]), "45.00")
+        self.assertEqual(str(daily_rows[0]["average_order_value"]), "15.00")
+        self.assertEqual(daily_rows[0]["cancelled_orders"], 1)
