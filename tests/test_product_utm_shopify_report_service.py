@@ -61,7 +61,7 @@ class ShopifyReportServiceTests(unittest.TestCase):
             {"/products/a": 1, "/products/b": 2},
         )
 
-        self.assertIn("SINCE '2026-07-27'", request_manager.last_query)
-        self.assertIn("UNTIL '2026-07-28'", request_manager.last_query)
+        self.assertIn("SINCE 2026-07-27", request_manager.last_query)
+        self.assertIn("UNTIL 2026-07-28", request_manager.last_query)
         self.assertIn("landing_page_path IN ('/products/a', '/products/b')", request_manager.last_query)
         self.assertNotIn("LIMIT 1000", request_manager.last_query)

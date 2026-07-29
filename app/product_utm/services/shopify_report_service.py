@@ -47,8 +47,8 @@ class ShopifyReportService:
             "AND landing_page_type = 'Product' "
             f"{path_clause} "
             f"GROUP BY {group_by} "
-            f"SINCE '{start_date.isoformat()}' "
-            f"UNTIL '{end_date.isoformat()}'"
+            f"SINCE {start_date.isoformat()} "
+            f"UNTIL {end_date.isoformat()}"
         )
 
     def _build_hourly_shopifyql_query(self, start_date: date, end_date: date, landing_page_paths: list[str]) -> str:
@@ -60,8 +60,8 @@ class ShopifyReportService:
             "AND landing_page_type = 'Product' "
             f"{path_clause} "
             "GROUP BY hour, landing_page_path, landing_page_type, utm_source "
-            f"SINCE '{start_date.isoformat()}' "
-            f"UNTIL '{end_date.isoformat()}'"
+            f"SINCE {start_date.isoformat()} "
+            f"UNTIL {end_date.isoformat()}"
         )
 
     def _normalize_rows(
