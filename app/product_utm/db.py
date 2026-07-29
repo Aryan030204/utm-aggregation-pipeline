@@ -32,6 +32,7 @@ class ProductUTMDBClient:
             user=self.user,
             password=self.password,
             database=self.database,
+            autocommit=True,
         )
         return self.connection
 
