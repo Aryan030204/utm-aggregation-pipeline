@@ -19,6 +19,8 @@ logger = get_logger(__name__)
 
 
 class ProductUTMWorkerService:
+    _debug_brand_selected = False
+
     def __init__(self, run_type: str, effective_end_date: date, retrospective_days: int | None = None):
         self.run_type = run_type
         self.effective_end_date = effective_end_date
@@ -73,7 +75,8 @@ class ProductUTMWorkerService:
             port=brand.port,
         )
         request_manager = GraphQLRequestManager(brand)
-        report_service = ShopifyReportService(brand, request_manager)
+        debug_mapping = self._should_debug_brand()
+        report_service = ShopifyReportService(brand, request_manager, debug_mapping=debug_mapping)
         product_repository = ProductRepository(db_client)
         orders_repository = OrdersRepository(db_client)
         table_service = TableService(db_client, brand.brand_name)
@@ -180,6 +183,13 @@ class ProductUTMWorkerService:
         if not merged_rows:
             logger.warning("[%s] Skipping %s write because merged replacement data is empty.", brand_name, granularity)
             return False
+        return True
+
+    @classmethod
+    def _should_debug_brand(cls) -> bool:
+        if cls._debug_brand_selected:
+            return False
+        cls._debug_brand_selected = True
         return True
 
     @staticmethod
