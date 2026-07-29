@@ -5,7 +5,7 @@ on:
     branches:
       - master
   schedule:
-    - cron: "0 * * * *"
+    - cron: "3,13,23,33,43,53 * * * *"
 
 jobs:
   run-daily-worker:
@@ -15,7 +15,7 @@ jobs:
       GET_BRANDS_API: ${{ secrets.GET_BRANDS_API }}
       PASSWORD_AES_KEY: ${{ secrets.PASSWORD_AES_KEY }}
       PIPELINE_AUTH_HEADER: ${{ secrets.PIPELINE_AUTH_HEADER }}
-      DAILY_WORKER_CRON: "0 * * * *"
+      DAILY_WORKER_CRON: "3,13,23,33,43,53 * * * *"
       RETROSPECTIVE_WORKER_CRON: "0 0 */2 * *"
       TOP_PRODUCT_LIMIT: "10"
       TOP_PRODUCT_LOOKBACK_DAYS: "30"
