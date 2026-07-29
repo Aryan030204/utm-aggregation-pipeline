@@ -13,7 +13,7 @@ SELECT
 FROM (
     SELECT
         so.*,
-        COALESCE(CONVERT_TZ(created_at, '+00:00', %s), created_at) AS local_created_at,
+        created_at AS local_created_at,
         IFNULL(r.is_cancelled, 0) AS is_cancelled,
         IFNULL(r.is_refunded, 0) AS is_refunded,
         CASE

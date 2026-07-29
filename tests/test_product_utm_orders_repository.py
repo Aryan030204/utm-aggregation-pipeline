@@ -16,7 +16,7 @@ class FakeDBClient:
 
 
 class OrdersRepositoryTests(unittest.TestCase):
-    def test_hourly_query_uses_sargable_utc_window(self):
+    def test_hourly_query_uses_sargable_local_window(self):
         client = FakeDBClient()
         repository = OrdersRepository(client)
 
@@ -24,14 +24,14 @@ class OrdersRepositoryTests(unittest.TestCase):
 
         self.assertIn("COALESCE(NULLIF(TRIM(utm_source), ''), 'Unknown') AS utm_source", client.query)
         self.assertIn("DATE(local_created_at) AS date", client.query)
-        self.assertIn("CONVERT_TZ(created_at, '+00:00', %s)", client.query)
+        self.assertIn("created_at AS local_created_at", client.query)
         self.assertIn("so.created_at >= %s", client.query)
         self.assertIn("so.created_at < %s", client.query)
         self.assertIn("GROUP BY date, hour, product_id, utm_source", client.query)
-        self.assertNotIn("DATE(COALESCE(CONVERT_TZ(created_at", client.query)
+        self.assertNotIn("CONVERT_TZ(created_at", client.query)
         self.assertNotIn("utm_medium", client.query)
         self.assertNotIn("utm_campaign", client.query)
-        self.assertEqual(client.params, ("Asia/Kolkata", "2026-07-26 18:30:00", "2026-07-28 18:30:00", 1, 2, 3))
+        self.assertEqual(client.params, ("2026-07-27 00:00:00", "2026-07-29 00:00:00", 1, 2, 3))
 
     def test_daily_aggregates_are_derived_from_hourly_rows(self):
         repository = OrdersRepository(FakeDBClient())
