@@ -50,6 +50,35 @@ class ShopifyReportServiceTests(unittest.TestCase):
         self.assertNotIn("utm_medium", rows[0])
         self.assertNotIn("utm_campaign", rows[0])
 
+    def test_dict_shaped_rows_are_parsed_without_using_column_names_as_values(self):
+        brand = BrandContext("1", "Brand", "h", "u", "p", "d", 3306, "token", "shop.myshopify.com", "2025-10", "UTC")
+        payload = {
+            "tableData": {
+                "columns": [
+                    {"name": "landing_page_path"},
+                    {"name": "landing_page_type"},
+                    {"name": "utm_source"},
+                    {"name": "sessions"},
+                    {"name": "sessions_with_cart_additions"},
+                ],
+                "rows": [
+                    {
+                        "landing_page_path": "/products/a",
+                        "landing_page_type": "Product",
+                        "utm_source": "google",
+                        "sessions": 5,
+                        "sessions_with_cart_additions": 1,
+                    }
+                ],
+            },
+            "parseErrors": [],
+        }
+        service = ShopifyReportService(brand=brand, request_manager=DummyRequestManager(payload))
+        rows = service.fetch_daily_rows(__import__("datetime").date(2026, 7, 28), __import__("datetime").date(2026, 7, 28), {"/products/a": 99})
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["product_id"], 99)
+        self.assertEqual(rows[0]["sessions"], 5)
+
     def test_queries_are_target_date_scoped_and_landing_page_scoped(self):
         brand = BrandContext("1", "Brand", "h", "u", "p", "d", 3306, "token", "shop.myshopify.com", "2025-10", "UTC")
         request_manager = DummyRequestManager({"tableData": {"columns": [], "rows": []}, "parseErrors": []})

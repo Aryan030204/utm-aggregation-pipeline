@@ -75,6 +75,9 @@ class ShopifyReportService:
         table_data = result.get("tableData") or {}
         columns = [column["name"] for column in table_data.get("columns", [])]
         raw_rows = table_data.get("rows", []) or []
+        if self.debug_mapping:
+            logger.info("[%s] %s raw Shopify columns: %s", self.brand.brand_name, granularity, columns)
+            logger.info("[%s] %s raw Shopify first row: %s", self.brand.brand_name, granularity, raw_rows[0] if raw_rows else None)
         if not raw_rows:
             logger.info("[%s] Shopify returned zero %s report rows.", self.brand.brand_name, granularity)
             return []
@@ -85,7 +88,7 @@ class ShopifyReportService:
         mapped_paths: set[str] = set()
         lookup_events: list[tuple[str, str, bool]] = []
         for raw_row in raw_rows:
-            row = dict(zip(columns, raw_row))
+            row = self._coerce_row_to_dict(columns, raw_row)
             landing_page_path = row.get("landing_page_path")
             normalized_key = self._normalize_for_diagnostics(landing_page_path)
             if isinstance(landing_page_path, str) and len(seen_shopify_paths) < 50:
@@ -195,7 +198,7 @@ class ShopifyReportService:
         mapped_paths: set[str],
     ) -> None:
         logger.info("[%s] %s debug top-product map: %s", self.brand.brand_name, granularity, list(landing_page_lookup.items())[:10])
-        logger.info("[%s] %s first Shopify landing_page_path values: %s", self.brand.brand_name, granularity, seen_shopify_paths[:50])
+        logger.info("[%s] %s first extracted Shopify landing_page_path values: %s", self.brand.brand_name, granularity, seen_shopify_paths[:10])
         for raw_value, normalized_key, is_hit in lookup_events:
             logger.info(
                 "[%s] %s lookup raw=%s normalized=%s result=%s",
@@ -252,3 +255,26 @@ class ShopifyReportService:
                 len(overlap),
                 examples,
             )
+
+    @staticmethod
+    def _coerce_row_to_dict(columns: list[str], raw_row: Any) -> dict[str, Any]:
+        if isinstance(raw_row, dict):
+            if "values" in raw_row and isinstance(raw_row["values"], list):
+                return ShopifyReportService._coerce_row_to_dict(columns, raw_row["values"])
+            if "cells" in raw_row and isinstance(raw_row["cells"], list):
+                return ShopifyReportService._coerce_row_to_dict(columns, raw_row["cells"])
+            return raw_row
+
+        if isinstance(raw_row, (list, tuple)):
+            extracted_values = [ShopifyReportService._extract_cell_value(cell) for cell in raw_row]
+            return dict(zip(columns, extracted_values))
+
+        return {columns[0]: ShopifyReportService._extract_cell_value(raw_row)} if columns else {}
+
+    @staticmethod
+    def _extract_cell_value(cell: Any) -> Any:
+        if isinstance(cell, dict):
+            for key in ("value", "rawValue", "displayValue", "text"):
+                if key in cell:
+                    return cell[key]
+        return cell
