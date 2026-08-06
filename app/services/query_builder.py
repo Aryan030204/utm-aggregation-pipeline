@@ -103,7 +103,7 @@ def build_select_aggregation_query(table_name: str, is_hourly: bool = False) -> 
         FROM (
             SELECT *, ({PAYMENT_TYPE_CASE_SQL}) AS payment_type
             FROM shopify_orders
-            WHERE DATE(created_at) = %s
+            WHERE created_at >= %s AND created_at < %s
         ) so
         LEFT JOIN (
             SELECT order_id,

@@ -2,6 +2,7 @@ import os
 import requests
 import base64
 from typing import List, Dict, Any
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 from app.utils.config import Config
@@ -103,6 +104,35 @@ class BrandFetcher:
         return brands
 
     @staticmethod
+    def _fetch_single_brand(brand_id_str: str, brand_name: str, headers: dict) -> Dict[str, Any] | None:
+        try:
+            brand_resp = requests.get(f"{Config.GET_BRANDS_API}/{brand_id_str}", headers=headers, timeout=10)
+            brand_resp.raise_for_status()
+            data = brand_resp.json()
+
+            if not BrandFetcher._is_api_brand_active(data):
+                resolved_name = data.get("brand_name", brand_name)
+                logger.info(
+                    f"Skipping brand_id {brand_id_str} ({resolved_name}) because is_active is not true."
+                )
+                return None
+            
+            decrypted_pw = decrypt_password(data.get("db_password", ""))
+            
+            return {
+                "brand_id": str(brand_id_str),
+                "brand_name": data.get("brand_name", brand_name),
+                "host": data.get("db_host", "localhost"),
+                "user": data.get("db_user", "root"),
+                "password": decrypted_pw,
+                "database": data.get("db_database", ""),
+                "port": int(data.get("port", 3306))
+            }
+        except Exception as subset_e:
+            logger.error(f"Could not fetch credentials for brand_id {brand_id_str}: {subset_e}")
+            return None
+
+    @staticmethod
     def _get_brands_from_api() -> List[Dict[str, Any]]:
         headers = {
             "x-pipeline-key": Config.PIPELINE_AUTH_HEADER
@@ -115,36 +145,21 @@ class BrandFetcher:
             
             brands_data_list = []
             
-            # 2. Iterate each brand_id and fetch its schema/credentials
-            for brand_id_str, brand_name in brands_map.items():
-                try:
-                    brand_resp = requests.get(f"{Config.GET_BRANDS_API}/{brand_id_str}", headers=headers, timeout=10)
-                    brand_resp.raise_for_status()
-                    data = brand_resp.json()
-
-                    if not BrandFetcher._is_api_brand_active(data):
-                        resolved_name = data.get("brand_name", brand_name)
-                        logger.info(
-                            f"Skipping brand_id {brand_id_str} ({resolved_name}) because is_active is not true."
-                        )
-                        continue
-                    
-                    decrypted_pw = decrypt_password(data.get("db_password", ""))
-                    
-                    brands_data_list.append({
-                        "brand_id": str(brand_id_str),
-                        "brand_name": data.get("brand_name", brand_name),
-                        "host": data.get("db_host", "localhost"),
-                        "user": data.get("db_user", "root"),
-                        "password": decrypted_pw,
-                        "database": data.get("db_database", ""),
-                        "port": int(data.get("port", 3306))
-                    })
-                except Exception as subset_e:
-                    logger.error(f"Could not fetch credentials for brand_id {brand_id_str}: {subset_e}")
+            # 2. Concurrently fetch details for all brand_ids
+            max_workers = min(10, max(1, len(brands_map)))
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = [
+                    executor.submit(BrandFetcher._fetch_single_brand, str(b_id), b_name, headers)
+                    for b_id, b_name in brands_map.items()
+                ]
+                for future in as_completed(futures):
+                    result = future.result()
+                    if result:
+                        brands_data_list.append(result)
                     
             return brands_data_list
             
         except Exception as e:
             logger.error(f"Failed to fetch initial brands mapping: {e}")
             return []
+

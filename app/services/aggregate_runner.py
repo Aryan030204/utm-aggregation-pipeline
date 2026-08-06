@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from typing import Dict, Any, List
 from app.utils.logger import get_logger
 from app.utils.retry import retry_db_operation
@@ -42,9 +43,13 @@ class AggregateRunner:
         # 2. Compute aggregated rows via a lock-free SELECT (pure MVCC) so
         #    we don't hold next-key locks on shopify_orders while the orders
         #    pipeline is writing to it.
+        start_dt = f"{metric_date} 00:00:00"
+        next_date = (datetime.strptime(metric_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+        end_dt = f"{next_date} 00:00:00"
+
         select_query = build_select_aggregation_query(table_name, is_hourly)
         rows = self.db_manager.execute_query(
-            select_query, (metric_date, metric_date), commit=False
+            select_query, (start_dt, end_dt, metric_date), commit=False
         )
 
         if not rows:
