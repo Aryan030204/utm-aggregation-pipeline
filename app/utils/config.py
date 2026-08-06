@@ -43,3 +43,9 @@ class Config:
     MANAGER_COMPLETED_ENDPOINT = os.getenv("MANAGER_COMPLETED_ENDPOINT", "")
     MANAGER_FAILED_ENDPOINT = os.getenv("MANAGER_FAILED_ENDPOINT", "")
     PIPELINE_ID = os.getenv("PIPELINE_ID", "")
+
+    # Global Retrospective Worker Settings
+    GLOBAL_RETROSPECTIVE_CRON = os.getenv("GLOBAL_RETROSPECTIVE_CRON", "35 18 * * *")  # Default: 00:05 AM IST / 18:35 UTC
+    GLOBAL_RETROSPECTIVE_LOOKBACK_DAYS = int(os.getenv("GLOBAL_RETROSPECTIVE_LOOKBACK_DAYS", "2"))
+    MAX_BRAND_RETRIES = int(os.getenv("MAX_BRAND_RETRIES", "3"))
+
