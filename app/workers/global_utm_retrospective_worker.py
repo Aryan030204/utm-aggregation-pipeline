@@ -5,7 +5,6 @@ import sys
 import time
 from datetime import date, datetime, timedelta
 from typing import List, Dict, Any
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from app.utils.config import Config
 from app.utils.logger import get_logger
@@ -64,13 +63,11 @@ class GlobalUtmRetrospectiveWorker:
         self,
         run_date: date,
         lookback_days: int,
-        max_retries: int | None = None,
-        max_concurrent_brands: int | None = None
+        max_retries: int | None = None
     ):
         self.run_date = run_date
         self.lookback_days = lookback_days
         self.max_retries = max_retries or Config.MAX_BRAND_RETRIES
-        self.max_concurrent_brands = max_concurrent_brands or Config.MAX_CONCURRENT_BRANDS
 
     def run(self) -> bool:
         start_time = time.perf_counter()
@@ -78,7 +75,7 @@ class GlobalUtmRetrospectiveWorker:
         logger.info(
             f"Starting Global UTM Retrospective Worker | Run Date: {self.run_date.isoformat()} | "
             f"Lookback Days: {self.lookback_days} | Target Dates: {target_dates} | "
-            f"Max Retries: {self.max_retries} | Max Concurrent Brands: {self.max_concurrent_brands}"
+            f"Max Retries: {self.max_retries}"
         )
 
         brands = BrandFetcher.get_all_brands()
@@ -90,23 +87,19 @@ class GlobalUtmRetrospectiveWorker:
         succeeded_brands: List[str] = []
         failed_brands: List[Dict[str, Any]] = []
 
-        max_workers = min(self.max_concurrent_brands, max(1, total_brands))
-        logger.info(f"Executing retrospective aggregations for {total_brands} brand(s) using {max_workers} worker thread(s)...")
+        logger.info(f"Processing {total_brands} brand(s) sequentially (1 brand at a time)...")
 
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {
-                executor.submit(process_single_brand, brand, target_dates, self.max_retries): brand.get("brand_name", "unknown")
-                for brand in brands
-            }
-            for future in as_completed(futures):
-                brand_name, success, error_msg = future.result()
-                if success:
-                    succeeded_brands.append(brand_name)
-                else:
-                    failed_brands.append({
-                        "brand_name": brand_name,
-                        "error": error_msg
-                    })
+        for index, brand in enumerate(brands, start=1):
+            brand_name = brand.get("brand_name", f"brand_{index}")
+            logger.info(f"[{index}/{total_brands}] Processing brand: {brand_name}")
+            b_name, success, error_msg = process_single_brand(brand, target_dates, self.max_retries)
+            if success:
+                succeeded_brands.append(b_name)
+            else:
+                failed_brands.append({
+                    "brand_name": b_name,
+                    "error": error_msg
+                })
 
         total_elapsed = round(time.perf_counter() - start_time, 2)
         logger.info("=" * 60)
@@ -148,13 +141,6 @@ def parse_args():
         default=None,
         help="Max retries per brand (defaults to Config.MAX_BRAND_RETRIES)"
     )
-    parser.add_argument(
-        "--max-concurrent-brands",
-        dest="max_concurrent_brands",
-        type=int,
-        default=None,
-        help="Max concurrent brand worker threads (defaults to Config.MAX_CONCURRENT_BRANDS)"
-    )
     return parser.parse_args()
 
 
@@ -171,13 +157,11 @@ def main():
 
     lookback_days = args.lookback_days if args.lookback_days is not None else Config.GLOBAL_RETROSPECTIVE_LOOKBACK_DAYS
     max_retries = args.max_retries if args.max_retries is not None else Config.MAX_BRAND_RETRIES
-    max_concurrent_brands = args.max_concurrent_brands if args.max_concurrent_brands is not None else Config.MAX_CONCURRENT_BRANDS
 
     worker = GlobalUtmRetrospectiveWorker(
         run_date=run_date,
         lookback_days=lookback_days,
-        max_retries=max_retries,
-        max_concurrent_brands=max_concurrent_brands
+        max_retries=max_retries
     )
 
     success = worker.run()
