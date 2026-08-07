@@ -7,17 +7,15 @@ from typing import Any, Callable
 from app.product_utm.config import ProductUTMConfig
 from app.product_utm.models import BrandContext, StageError
 from app.product_utm.services.graphql_request_manager import GraphQLRequestManager
-from app.services.payment_classifier import classify_payment_type
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
-class ShopifyOrdersFetcher:
-    """Fetches order-level UTM/sales rows from Shopify via ShopifyQL, paginated with
-    LIMIT/OFFSET. Rows are grouped by order_id (in addition to the UTM dimensions and
-    payment_gateway_names) so each row stays joinable against returns_fact by order_id
-    before being collapsed into the final UTM-dimension buckets in UtmMergeService."""
+class ShopifySessionsFetcher:
+    """Fetches sessions/atc_sessions rows from Shopify via ShopifyQL 'FROM sessions',
+    grouped by utm_source/utm_medium/utm_campaign (and hour, for hourly tables),
+    paginated with LIMIT/OFFSET the same way as the orders fetch used to be."""
 
     def __init__(self, brand: BrandContext, request_manager: GraphQLRequestManager):
         self.brand = brand
@@ -47,9 +45,9 @@ class ShopifyOrdersFetcher:
                 return rows
 
         raise StageError(
-            "Fetching Shopify Orders",
+            "Fetching Shopify Sessions",
             f"[{self.brand.brand_name}] Exceeded max page ceiling ({max_pages}) "
-            "without reaching the end of the orders dataset.",
+            "without reaching the end of the sessions dataset.",
         )
 
     def _fetch_page_with_retry(self, query: str) -> list[dict[str, Any]]:
@@ -64,26 +62,25 @@ class ShopifyOrdersFetcher:
                 if attempt < max_retries:
                     sleep_seconds = ProductUTMConfig.SHOPIFYQL_PAGE_FETCH_BASE_BACKOFF_SECONDS * (2 ** (attempt - 1))
                     logger.warning(
-                        "[%s] Orders page fetch attempt %s/%s failed: %s. Retrying in %ss...",
+                        "[%s] Sessions page fetch attempt %s/%s failed: %s. Retrying in %ss...",
                         self.brand.brand_name, attempt, max_retries, exc, sleep_seconds,
                     )
                     time.sleep(sleep_seconds)
 
         raise StageError(
-            "Fetching Shopify Orders",
+            "Fetching Shopify Sessions",
             f"[{self.brand.brand_name}] Exhausted {max_retries} page-fetch retries.",
             original_exception=last_exc,
         )
 
     @staticmethod
     def _build_query(metric_date: str, hourly: bool, page_size: int, offset: int) -> str:
-        group_dims = (["hour"] if hourly else []) + [
-            "order_id", "utm_source", "utm_medium", "utm_campaign", "payment_gateway_names",
-        ]
+        group_dims = (["hour"] if hourly else []) + ["utm_source", "utm_medium", "utm_campaign"]
         group_by = ", ".join(group_dims)
         return (
-            "FROM sales "
-            "SHOW orders, total_sales "
+            "FROM sessions "
+            "SHOW sessions, sessions_with_cart_additions "
+            "WHERE human_or_bot_session IN ('human','bot') "
             f"GROUP BY {group_by} "
             f"SINCE {metric_date} UNTIL {metric_date} "
             f"ORDER BY {group_by} "
@@ -99,15 +96,21 @@ class ShopifyOrdersFetcher:
         for raw_row in raw_rows:
             row = self._coerce_row_to_dict(columns, raw_row)
             normalized.append({
-                "order_id": row.get("order_id"),
                 "hour": self._extract_hour(row.get("hour")) if "hour" in row else None,
-                "utm_source": self._normalize_dimension(row.get("utm_source")),
+                "utm_source": self._normalize_source(row.get("utm_source")),
                 "utm_medium": self._normalize_dimension(row.get("utm_medium")),
                 "utm_campaign": self._normalize_dimension(row.get("utm_campaign")),
-                "payment_type": classify_payment_type(row.get("payment_gateway_names")),
-                "sales": float(row.get("total_sales", 0) or 0),
+                "sessions": int(float(row.get("sessions", 0) or 0)),
+                "atc_sessions": int(float(row.get("sessions_with_cart_additions", 0) or 0)),
             })
         return normalized
+
+    @staticmethod
+    def _normalize_source(value: Any) -> str:
+        text = str(value).strip() if value is not None else ""
+        if not text or text.lower() in ("", "unknown"):
+            return "direct"
+        return text
 
     @staticmethod
     def _normalize_dimension(value: Any) -> str:
@@ -132,16 +135,16 @@ class ShopifyOrdersFetcher:
     def _coerce_row_to_dict(columns: list[str], raw_row: Any) -> dict[str, Any]:
         if isinstance(raw_row, dict):
             if "values" in raw_row and isinstance(raw_row["values"], list):
-                return ShopifyOrdersFetcher._coerce_row_to_dict(columns, raw_row["values"])
+                return ShopifySessionsFetcher._coerce_row_to_dict(columns, raw_row["values"])
             if "cells" in raw_row and isinstance(raw_row["cells"], list):
-                return ShopifyOrdersFetcher._coerce_row_to_dict(columns, raw_row["cells"])
+                return ShopifySessionsFetcher._coerce_row_to_dict(columns, raw_row["cells"])
             return raw_row
 
         if isinstance(raw_row, (list, tuple)):
-            extracted_values = [ShopifyOrdersFetcher._extract_cell_value(cell) for cell in raw_row]
+            extracted_values = [ShopifySessionsFetcher._extract_cell_value(cell) for cell in raw_row]
             return dict(zip(columns, extracted_values))
 
-        return {columns[0]: ShopifyOrdersFetcher._extract_cell_value(raw_row)} if columns else {}
+        return {columns[0]: ShopifySessionsFetcher._extract_cell_value(raw_row)} if columns else {}
 
     @staticmethod
     def _extract_cell_value(cell: Any) -> Any:

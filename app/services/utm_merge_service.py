@@ -4,17 +4,16 @@ from typing import Any, Dict, List, Tuple
 
 
 class UtmMergeService:
-    """Joins order-level Shopify rows (already payment-classified) against a
-    returns_fact cancel/refund lookup keyed by order_id, then collapses everything
-    down to the UTM-dimension buckets a given aggregate table needs, merging in the
-    matching session rows and computing the derived rate columns."""
+    """Merges the two independently-aggregated row sets for a table -- orders/sales/
+    returns from MySQL (already grouped by the table's UTM dimensions) and sessions/
+    atc_sessions from Shopify GraphQL (grouped by all three UTM dims, collapsed here
+    down to whatever subset the table needs) -- and computes the derived rate columns."""
 
     @staticmethod
     def merge(
         dims: List[str],
         metric_date: str,
         order_rows: List[Dict[str, Any]],
-        returns_lookup: Dict[str, Dict[str, int]],
         session_rows: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
         is_hourly = "metric_hour" in dims
@@ -36,25 +35,18 @@ class UtmMergeService:
             })
 
         for row in order_rows:
-            key = UtmMergeService._order_key(row, utm_dims, is_hourly)
+            key = UtmMergeService._key(row, utm_dims, is_hourly, hour_field="metric_hour")
             m = bucket(key)
-            m["orders"] += 1
+            m["orders"] += int(row.get("orders", 0) or 0)
             m["sales"] += float(row.get("sales", 0) or 0)
-
-            payment_type = row.get("payment_type")
-            if payment_type == "PREPAID":
-                m["prepaid_orders"] += 1
-            elif payment_type == "COD":
-                m["cod_orders"] += 1
-            elif payment_type == "PPCOD":
-                m["ppcod_orders"] += 1
-
-            returns = returns_lookup.get(row.get("order_id"), {})
-            m["cancelled_orders"] += int(returns.get("is_cancelled", 0) or 0)
-            m["refunded_orders"] += int(returns.get("is_refunded", 0) or 0)
+            m["prepaid_orders"] += int(row.get("prepaid_orders", 0) or 0)
+            m["cod_orders"] += int(row.get("cod_orders", 0) or 0)
+            m["ppcod_orders"] += int(row.get("ppcod_orders", 0) or 0)
+            m["cancelled_orders"] += int(row.get("cancelled_orders", 0) or 0)
+            m["refunded_orders"] += int(row.get("refunded_orders", 0) or 0)
 
         for row in session_rows:
-            key = UtmMergeService._session_key(row, utm_dims, is_hourly)
+            key = UtmMergeService._collapse_key(row, utm_dims, is_hourly)
             m = bucket(key)
             m["sessions"] += int(row.get("sessions", 0) or 0)
             m["atc_sessions"] += int(row.get("atc_sessions", 0) or 0)
@@ -90,15 +82,18 @@ class UtmMergeService:
         return results
 
     @staticmethod
-    def _order_key(row: Dict[str, Any], utm_dims: List[str], is_hourly: bool) -> Tuple[Any, ...]:
+    def _key(row: Dict[str, Any], utm_dims: List[str], is_hourly: bool, hour_field: str) -> Tuple[Any, ...]:
+        """Key for rows already aggregated at exactly the table's UTM dims (order_rows)."""
         key = tuple(row.get(d, "Unknown") for d in utm_dims)
         if is_hourly:
-            key = (row.get("hour", 0),) + key
+            key = (row.get(hour_field, 0),) + key
         return key
 
     @staticmethod
-    def _session_key(row: Dict[str, Any], utm_dims: List[str], is_hourly: bool) -> Tuple[Any, ...]:
+    def _collapse_key(row: Dict[str, Any], utm_dims: List[str], is_hourly: bool) -> Tuple[Any, ...]:
+        """Key for session rows, which always carry the full utm_source/medium/campaign
+        combo -- collapsed down to whichever subset this table's dims actually use."""
         key = tuple(row.get(d, "Unknown") for d in utm_dims)
         if is_hourly:
-            key = (row.get("metric_hour", 0),) + key
+            key = (row.get("hour", 0),) + key
         return key

@@ -1,4 +1,5 @@
 from typing import List
+from app.services.payment_classifier import PAYMENT_TYPE_CASE_SQL
 
 METRIC_COLUMNS = [
     "orders",
@@ -31,61 +32,52 @@ def get_all_columns(table_name: str, is_hourly: bool = False) -> List[str]:
 def build_delete_query(table_name: str) -> str:
     return f"DELETE FROM {table_name} WHERE metric_date = %s;"
 
-def build_sessions_query(table_name: str, is_hourly: bool = False) -> str:
-    """Sessions/ATC-sessions aggregated by the table's UTM dimensions. Orders/sales
-    now come from Shopify GraphQL (see ShopifyOrdersFetcher), not this table."""
+def build_orders_query(table_name: str, is_hourly: bool = False) -> str:
+    """Orders + sales + payment-type split + cancel/refund counts, aggregated by the
+    table's UTM dimensions. Sessions/atc_sessions are fetched separately from Shopify
+    GraphQL (see ShopifySessionsFetcher), not from this query."""
     dims = get_dimension_columns(table_name, is_hourly)
-    sessions_table = "hourly_product_sessions" if is_hourly else "product_sessions_snapshot"
 
-    session_select_dims = []
+    order_select_dims = []
     group_by_dims = []
 
     for d in dims:
         if d == "metric_date":
-            session_select_dims.append("date AS metric_date")
+            order_select_dims.append("DATE(so.created_at) AS metric_date")
             group_by_dims.append("metric_date")
         elif d == "metric_hour":
-            session_select_dims.append("hour AS metric_hour")
+            order_select_dims.append("HOUR(so.created_at) AS metric_hour")
             group_by_dims.append("metric_hour")
         else:
-            if d == "utm_source":
-                session_select_dims.append(
-                    "CASE "
-                    f"WHEN LOWER(TRIM(COALESCE({d}, ''))) = 'direct' THEN 'direct' "
-                    "WHEN LOWER(COALESCE(referrer_name, '')) = 'direct' THEN 'direct' "
-                    f"WHEN LOWER(TRIM(COALESCE({d}, ''))) IN ('', 'unknown') THEN 'direct' "
-                    f"ELSE {d} END AS {d}"
-                )
-            else:
-                session_select_dims.append(f"IFNULL({d}, 'Unknown') AS {d}")
+            order_select_dims.append(f"IFNULL(so.{d}, 'Unknown') AS {d}")
             group_by_dims.append(d)
 
-    session_select_str = ", ".join(session_select_dims)
+    order_select_str = ", ".join(order_select_dims)
     group_by_str = ", ".join(group_by_dims)
 
     return f"""
     SELECT
-        {session_select_str},
-        SUM(IFNULL(sessions, 0)) AS sessions,
-        SUM(IFNULL(sessions_with_cart_additions, 0)) AS atc_sessions
-    FROM {sessions_table}
-    WHERE date = %s
+        {order_select_str},
+        COUNT(DISTINCT so.order_id) AS orders,
+        COALESCE(SUM(so.total_price), 0) AS sales,
+        SUM(CASE WHEN payment_type = 'PREPAID' THEN 1 ELSE 0 END) AS prepaid_orders,
+        SUM(CASE WHEN payment_type = 'COD' THEN 1 ELSE 0 END) AS cod_orders,
+        SUM(CASE WHEN payment_type = 'PPCOD' THEN 1 ELSE 0 END) AS ppcod_orders,
+        SUM(IFNULL(r.is_cancelled, 0)) AS cancelled_orders,
+        SUM(IFNULL(r.is_refunded, 0)) AS refunded_orders
+    FROM (
+        SELECT *, ({PAYMENT_TYPE_CASE_SQL}) AS payment_type
+        FROM shopify_orders
+        WHERE created_at >= %s AND created_at < %s
+    ) so
+    LEFT JOIN (
+        SELECT order_id,
+               MAX(CASE WHEN event_type = 'CANCEL' THEN 1 ELSE 0 END) AS is_cancelled,
+               MAX(CASE WHEN event_type = 'REFUND' THEN 1 ELSE 0 END) AS is_refunded
+        FROM returns_fact
+        GROUP BY order_id
+    ) r ON so.order_id = r.order_id
     GROUP BY {group_by_str};
-    """
-
-
-def build_returns_lookup_query(order_ids: List[str]) -> str:
-    """Cancel/refund flags for a specific batch of order_ids fetched from GraphQL.
-    returns_fact has no date column of its own, so scoping is done by order_id set
-    rather than by date range."""
-    placeholders = ", ".join(["%s"] * len(order_ids))
-    return f"""
-    SELECT order_id,
-           MAX(CASE WHEN event_type = 'CANCEL' THEN 1 ELSE 0 END) AS is_cancelled,
-           MAX(CASE WHEN event_type = 'REFUND' THEN 1 ELSE 0 END) AS is_refunded
-    FROM returns_fact
-    WHERE order_id IN ({placeholders})
-    GROUP BY order_id;
     """
 
 def build_bulk_insert_query(table_name: str, columns: List[str], num_rows: int) -> str:
