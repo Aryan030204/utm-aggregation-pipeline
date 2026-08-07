@@ -42,7 +42,13 @@ class AggregateRunner:
         """Ensures that the aggregate tables exist before we try to populate them."""
         ensure_tables_exist(self.db_manager)
 
-    def _rebuild_table(self, table_name: str, is_hourly: bool, metric_date: str):
+    def _rebuild_table(
+        self,
+        table_name: str,
+        is_hourly: bool,
+        metric_date: str,
+        session_rows: List[Dict[str, Any]],
+    ):
         columns = get_all_columns(table_name, is_hourly)
         dims = get_dimension_columns(table_name, is_hourly)
 
@@ -59,19 +65,13 @@ class AggregateRunner:
             build_orders_query(table_name, is_hourly), (start_dt, end_dt), commit=False
         )
 
-        # 3. Sessions + atc_sessions, fetched live from Shopify GraphQL (paginated ShopifyQL)
-        session_rows = (
-            self.sessions_fetcher.fetch_hourly_rows(metric_date) if is_hourly
-            else self.sessions_fetcher.fetch_daily_rows(metric_date)
-        )
-
-        # 4. Merge into the table's UTM-dimension rows
+        # 3. Merge orders with the (already-fetched, shared-across-tables) session rows
         rows = UtmMergeService.merge(dims, metric_date, order_rows, session_rows)
 
         if not rows:
             return
 
-        # 5. Bulk insert the merged rows into the aggregate table in chunks.
+        # 4. Bulk insert the merged rows into the aggregate table in chunks.
         for start in range(0, len(rows), INSERT_CHUNK_SIZE):
             chunk = rows[start:start + INSERT_CHUNK_SIZE]
             insert_query = build_bulk_insert_query(table_name, columns, len(chunk))
@@ -83,15 +83,26 @@ class AggregateRunner:
     @retry_db_operation()
     def run_aggregations(self):
         brand_name = self.brand_info["brand_name"]
-        all_tables = [(t, False) for t in DAILY_TABLES] + [(t, True) for t in HOURLY_TABLES]
 
         try:
             for metric_date in self.target_dates:
                 logger.info(f"Starting aggregations for brand: {brand_name}, date: {metric_date}")
 
-                for table_name, is_hourly in all_tables:
+                # Sessions/atc_sessions are grouped by utm_source/utm_medium/utm_campaign
+                # (+hour) regardless of which of the 7 daily/7 hourly tables is being
+                # rebuilt, so fetch each granularity from Shopify once per date and
+                # reuse it across all tables of that granularity, instead of re-fetching
+                # (and re-paginating) the same data 7x over.
+                daily_session_rows = self.sessions_fetcher.fetch_daily_rows(metric_date)
+                hourly_session_rows = self.sessions_fetcher.fetch_hourly_rows(metric_date)
+
+                for table_name in DAILY_TABLES:
                     logger.debug(f"Rebuilding {table_name} for date {metric_date}")
-                    self._rebuild_table(table_name, is_hourly, metric_date)
+                    self._rebuild_table(table_name, False, metric_date, daily_session_rows)
+
+                for table_name in HOURLY_TABLES:
+                    logger.debug(f"Rebuilding {table_name} for date {metric_date}")
+                    self._rebuild_table(table_name, True, metric_date, hourly_session_rows)
 
             logger.info(f"Successfully rebuilt all tables for {brand_name} across {len(self.target_dates)} day(s).")
         except Exception as e:
