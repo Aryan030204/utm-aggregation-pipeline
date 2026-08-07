@@ -23,3 +23,9 @@ class ProductUTMConfig:
 
     DB_BATCH_SIZE = int(os.getenv("DB_BATCH_SIZE", "500"))
     WORKFLOW_TIMEOUT_MINUTES = int(os.getenv("WORKFLOW_TIMEOUT_MINUTES", "60"))
+
+    # Global UTM retrospective worker: paginated ShopifyQL order/sales fetch
+    SHOPIFYQL_ORDERS_PAGE_SIZE = int(os.getenv("SHOPIFYQL_ORDERS_PAGE_SIZE", "250"))
+    SHOPIFYQL_ORDERS_MAX_PAGES = int(os.getenv("SHOPIFYQL_ORDERS_MAX_PAGES", "200"))
+    SHOPIFYQL_PAGE_FETCH_MAX_RETRIES = int(os.getenv("SHOPIFYQL_PAGE_FETCH_MAX_RETRIES", "3"))
+    SHOPIFYQL_PAGE_FETCH_BASE_BACKOFF_SECONDS = float(os.getenv("SHOPIFYQL_PAGE_FETCH_BASE_BACKOFF_SECONDS", "2"))

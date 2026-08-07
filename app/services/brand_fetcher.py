@@ -98,7 +98,11 @@ class BrandFetcher:
                 "user": os.getenv(f"DB_USER_{i}", "root"),
                 "password": os.getenv(f"DB_PASSWORD_{i}", ""),
                 "database": db_name,
-                "port": int(os.getenv(f"DB_PORT_{i}", 3306))
+                "port": int(os.getenv(f"DB_PORT_{i}", 3306)),
+                "access_token": os.getenv(f"ACCESS_TOKEN_{i}", ""),
+                "shop_name": os.getenv(f"SHOP_NAME_{i}", ""),
+                "api_version": os.getenv(f"API_VERSION_{i}", "2025-10"),
+                "store_timezone": os.getenv(f"STORE_TIMEZONE_{i}", "UTC"),
             })
             
         return brands
@@ -118,7 +122,8 @@ class BrandFetcher:
                 return None
             
             decrypted_pw = decrypt_password(data.get("db_password", ""))
-            
+            decrypted_access_token = decrypt_password(data.get("access_token", ""))
+
             return {
                 "brand_id": str(brand_id_str),
                 "brand_name": data.get("brand_name", brand_name),
@@ -126,7 +131,11 @@ class BrandFetcher:
                 "user": data.get("db_user", "root"),
                 "password": decrypted_pw,
                 "database": data.get("db_database", ""),
-                "port": int(data.get("port", 3306))
+                "port": int(data.get("port", 3306)),
+                "access_token": decrypted_access_token,
+                "shop_name": data.get("shop_name", ""),
+                "api_version": data.get("api_version", "2025-10"),
+                "store_timezone": data.get("store_timezone", "UTC"),
             }
         except Exception as subset_e:
             logger.error(f"Could not fetch credentials for brand_id {brand_id_str}: {subset_e}")

@@ -1,19 +1,26 @@
-from datetime import datetime, timedelta
 from typing import Dict, Any, List
+
 from app.utils.logger import get_logger
 from app.utils.retry import retry_db_operation
 from app.services.db_manager import DBManager
+from app.services.brand_context import build_brand_context
 from app.services.query_builder import (
     build_delete_query,
-    build_select_aggregation_query,
+    build_sessions_query,
+    build_returns_lookup_query,
     build_bulk_insert_query,
     get_all_columns,
+    get_dimension_columns,
 )
+from app.services.shopify_orders_fetcher import ShopifyOrdersFetcher
+from app.services.utm_merge_service import UtmMergeService
+from app.product_utm.services.graphql_request_manager import GraphQLRequestManager
 from app.sql.setup import ensure_tables_exist, DAILY_TABLES, HOURLY_TABLES
 
 logger = get_logger(__name__)
 
 INSERT_CHUNK_SIZE = 500
+RETURNS_LOOKUP_CHUNK_SIZE = 1000
 
 class AggregateRunner:
     def __init__(self, brand_info: Dict[str, Any], target_dates: List[str]):
@@ -27,35 +34,62 @@ class AggregateRunner:
             database=brand_info["database"],
             port=brand_info.get("port", 3306)
         )
+        brand_context = build_brand_context(brand_info)
+        request_manager = GraphQLRequestManager(brand_context)
+        self.orders_fetcher = ShopifyOrdersFetcher(brand_context, request_manager)
 
     @retry_db_operation()
     def initialize(self):
         """Ensures that the aggregate tables exist before we try to populate them."""
         ensure_tables_exist(self.db_manager)
 
+    def _fetch_returns_lookup(self, order_rows: List[Dict[str, Any]]) -> Dict[str, Dict[str, int]]:
+        order_ids = sorted({row["order_id"] for row in order_rows if row.get("order_id")})
+        if not order_ids:
+            return {}
+
+        lookup: Dict[str, Dict[str, int]] = {}
+        for start in range(0, len(order_ids), RETURNS_LOOKUP_CHUNK_SIZE):
+            chunk = order_ids[start:start + RETURNS_LOOKUP_CHUNK_SIZE]
+            rows = self.db_manager.execute_query(
+                build_returns_lookup_query(chunk), tuple(chunk), commit=False
+            )
+            for row in rows:
+                lookup[row["order_id"]] = {
+                    "is_cancelled": row["is_cancelled"],
+                    "is_refunded": row["is_refunded"],
+                }
+        return lookup
+
     def _rebuild_table(self, table_name: str, is_hourly: bool, metric_date: str):
         columns = get_all_columns(table_name, is_hourly)
+        dims = get_dimension_columns(table_name, is_hourly)
 
         # 1. Delete current day's aggregates
         delete_query = build_delete_query(table_name)
         self.db_manager.execute_query(delete_query, (metric_date,), commit=True)
 
-        # 2. Compute aggregated rows via a lock-free SELECT (pure MVCC) so
-        #    we don't hold next-key locks on shopify_orders while the orders
-        #    pipeline is writing to it.
-        start_dt = f"{metric_date} 00:00:00"
-        next_date = (datetime.strptime(metric_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
-        end_dt = f"{next_date} 00:00:00"
-
-        select_query = build_select_aggregation_query(table_name, is_hourly)
-        rows = self.db_manager.execute_query(
-            select_query, (start_dt, end_dt, metric_date), commit=False
+        # 2. Fetch order-level rows straight from Shopify (paginated ShopifyQL)
+        order_rows = (
+            self.orders_fetcher.fetch_hourly_rows(metric_date) if is_hourly
+            else self.orders_fetcher.fetch_daily_rows(metric_date)
         )
+
+        # 3. Look up cancel/refund flags for exactly the orders we just fetched
+        returns_lookup = self._fetch_returns_lookup(order_rows)
+
+        # 4. Fetch session rows for the same date (unchanged source)
+        session_rows = self.db_manager.execute_query(
+            build_sessions_query(table_name, is_hourly), (metric_date,), commit=False
+        )
+
+        # 5. Merge order + returns + session data into the table's UTM-dimension rows
+        rows = UtmMergeService.merge(dims, metric_date, order_rows, returns_lookup, session_rows)
 
         if not rows:
             return
 
-        # 3. Bulk insert the fetched rows into the aggregate table in chunks.
+        # 6. Bulk insert the merged rows into the aggregate table in chunks.
         for start in range(0, len(rows), INSERT_CHUNK_SIZE):
             chunk = rows[start:start + INSERT_CHUNK_SIZE]
             insert_query = build_bulk_insert_query(table_name, columns, len(chunk))
