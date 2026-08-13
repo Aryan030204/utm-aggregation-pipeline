@@ -22,7 +22,7 @@ class OrdersRepositoryTests(unittest.TestCase):
 
         repository.fetch_hourly_aggregates(date(2026, 7, 27), date(2026, 7, 28), [1, 2, 3], "(GMT+05:30) Asia/Kolkata")
 
-        self.assertIn("COALESCE(NULLIF(TRIM(utm_source), ''), 'Unknown') AS utm_source", client.query)
+        self.assertIn("COALESCE(NULLIF(TRIM(utm_source), ''), 'direct') AS utm_source", client.query)
         self.assertIn("DATE(local_created_at) AS date", client.query)
         self.assertIn("created_at AS local_created_at", client.query)
         self.assertIn("so.created_at >= %s", client.query)

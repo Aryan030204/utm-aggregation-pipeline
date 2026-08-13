@@ -49,7 +49,8 @@ def build_orders_query(table_name: str, is_hourly: bool = False) -> str:
             order_select_dims.append("HOUR(so.created_at) AS metric_hour")
             group_by_dims.append("metric_hour")
         else:
-            order_select_dims.append(f"IFNULL(so.{d}, 'Unknown') AS {d}")
+            fallback_value = "direct" if d == "utm_source" else "Unknown"
+            order_select_dims.append(f"IFNULL(so.{d}, '{fallback_value}') AS {d}")
             group_by_dims.append(d)
 
     order_select_str = ", ".join(order_select_dims)

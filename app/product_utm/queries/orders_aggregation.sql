@@ -2,7 +2,7 @@ SELECT
     {date_select}
     {extra_select},
     product_id,
-    COALESCE(NULLIF(TRIM(utm_source), ''), 'Unknown') AS utm_source,
+    COALESCE(NULLIF(TRIM(utm_source), ''), 'direct') AS utm_source,
     COUNT(DISTINCT order_id) AS orders,
     COALESCE(SUM(total_price), 0) AS sales,
     SUM(CASE WHEN payment_type = 'COD' THEN 1 ELSE 0 END) AS cod_orders,

@@ -125,6 +125,6 @@ class OrdersRepository:
     @staticmethod
     def _normalize_source(value: object) -> str:
         if value is None:
-            return "Unknown"
+            return "direct"
         text = str(value).strip()
-        return text or "Unknown"
+        return text or "direct"
