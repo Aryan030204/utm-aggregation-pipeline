@@ -8,6 +8,7 @@ from typing import List, Dict, Any
 
 from app.utils.config import Config
 from app.utils.logger import get_logger
+from app.utils.self_scheduler import run_forever
 from app.services.brand_fetcher import BrandFetcher
 from app.services.aggregate_runner import AggregateRunner
 
@@ -144,29 +145,42 @@ def parse_args():
     return parser.parse_args()
 
 
-def main():
-    args = parse_args()
-
+def run_once(run_date_str: str | None, lookback_days: int, max_retries: int) -> bool:
+    # Recomputed fresh on every call so a self-scheduled loop always targets
+    # "today" at fire time, not whatever date the container happened to start on.
     run_date = datetime.utcnow().date()
-    if args.run_date:
+    if run_date_str:
         try:
-            run_date = date.fromisoformat(args.run_date)
+            run_date = date.fromisoformat(run_date_str)
         except ValueError:
-            logger.error(f"Invalid --run-date format: {args.run_date}. Expected YYYY-MM-DD.")
-            sys.exit(1)
-
-    lookback_days = args.lookback_days if args.lookback_days is not None else Config.GLOBAL_RETROSPECTIVE_LOOKBACK_DAYS
-    max_retries = args.max_retries if args.max_retries is not None else Config.MAX_BRAND_RETRIES
+            logger.error(f"Invalid run date: {run_date_str}. Expected YYYY-MM-DD.")
+            return False
 
     worker = GlobalUtmRetrospectiveWorker(
         run_date=run_date,
         lookback_days=lookback_days,
         max_retries=max_retries
     )
+    return worker.run()
 
-    success = worker.run()
-    if not success:
-        sys.exit(1)
+
+def main():
+    args = parse_args()
+    lookback_days = args.lookback_days if args.lookback_days is not None else Config.GLOBAL_RETROSPECTIVE_LOOKBACK_DAYS
+    max_retries = args.max_retries if args.max_retries is not None else Config.MAX_BRAND_RETRIES
+
+    if args.run_date:
+        # Explicit date passed (manual/CI use) -> run once and exit.
+        success = run_once(args.run_date, lookback_days, max_retries)
+        if not success:
+            sys.exit(1)
+    else:
+        # Container startup with no overrides -> self-schedule forever.
+        run_forever(
+            lambda: run_once(None, lookback_days, max_retries),
+            Config.GLOBAL_RETROSPECTIVE_CRON,
+            job_id="global_utm_retrospective_worker",
+        )
 
 
 if __name__ == "__main__":

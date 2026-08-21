@@ -1,19 +1,21 @@
-version: '3.8'
-
 services:
-  utm-aggregate-pipeline:
+  daily-product-utm-worker:
     build: .
-    container_name: utm-aggregate-pipeline
-    restart: on-failure
-    env_file:
-      - .env
-      - .env.local
-    ports:
-      - "8005:8000"
-    networks:
-      - pipeline-net
+    image: daily-product-utm-worker:latest
+    command: ["python", "-m", "app.workers.daily_product_utm_worker"]
+    env_file: .env
+    restart: unless-stopped
 
-networks:
-  pipeline-net:
-    external: true
+  retrospective-product-utm-worker:
+    build: .
+    image: retrospective-product-utm-worker:latest
+    command: ["python", "-m", "app.workers.retrospective_product_utm_worker"]
+    env_file: .env
+    restart: unless-stopped
 
+  global-utm-retrospective-worker:
+    build: .
+    image: global-utm-retrospective-worker:latest
+    command: ["python", "-m", "app.workers.global_utm_retrospective_worker"]
+    env_file: .env
+    restart: unless-stopped
