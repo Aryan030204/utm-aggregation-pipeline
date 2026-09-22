@@ -213,7 +213,7 @@ def main():
     if Config.SELF_RUN:
         logger.info(f"SELF_RUN is enabled. Starting scheduler with pattern: {Config.PIPELINE_SCHEDULE}")
         scheduler = BackgroundScheduler()
-        
+
         def scheduled_job():
             logger.info("Executing scheduled pipeline run...")
             event = EtlTriggerEvent(
@@ -229,6 +229,11 @@ def main():
             id="utm_pipeline_job"
         )
         scheduler.start()
+
+        # Run once immediately on startup so a container reboot/rebuild doesn't have
+        # to wait for the next cron tick, matching the other self-scheduled workers.
+        logger.info("Running pipeline once immediately on startup...")
+        scheduled_job()
     else:
         logger.info("SELF_RUN is disabled. Pipeline will only run via manual triggers.")
 
