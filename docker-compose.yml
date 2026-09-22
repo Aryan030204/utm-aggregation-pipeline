@@ -8,6 +8,9 @@ services:
     ports:
       - "8000:8000"
     restart: unless-stopped
+    networks:
+      - default
+      - pipeline-net
 
   daily-product-utm-worker:
     build: .
@@ -29,3 +32,8 @@ services:
     command: ["python", "-m", "app.workers.global_utm_retrospective_worker"]
     env_file: .env
     restart: unless-stopped
+
+networks:
+  default: {}
+  pipeline-net:
+    external: true
