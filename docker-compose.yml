@@ -1,4 +1,13 @@
 services:
+  utm-pipeline-api:
+    build: .
+    image: utm-pipeline-api:latest
+    command: ["python", "-m", "app.main"]
+    env_file: .env
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
   daily-product-utm-worker:
     build: .
     image: daily-product-utm-worker:latest
