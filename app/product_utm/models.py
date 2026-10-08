@@ -62,6 +62,7 @@ class StageError(Exception):
     reason: str
     retry_count: int = 0
     original_exception: Optional[Exception] = None
+    retryable: bool = True
 
     def __str__(self) -> str:
         return f"{self.stage}: {self.reason}"

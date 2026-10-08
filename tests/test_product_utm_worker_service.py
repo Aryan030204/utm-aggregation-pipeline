@@ -7,6 +7,9 @@ from app.product_utm.services.worker_service import ProductUTMWorkerService
 
 
 class WorkerServiceTests(unittest.TestCase):
+    def setUp(self):
+        ProductUTMWorkerService.reset_caches()
+
     def test_should_write_dataset_skips_empty_replacements(self):
         self.assertFalse(ProductUTMWorkerService._should_write_dataset("Brand", "daily", [], [{"x": 1}]))
         self.assertFalse(ProductUTMWorkerService._should_write_dataset("Brand", "daily", [{"x": 1}], []))

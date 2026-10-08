@@ -1,8 +1,9 @@
+import time
 from datetime import datetime, timedelta
 from typing import Dict, Any, List
 
 from app.utils.logger import get_logger
-from app.utils.retry import retry_db_operation
+from app.utils.retry import retry_db_operation, is_transient_db_error
 from app.services.db_manager import DBManager
 from app.services.brand_context import build_brand_context
 from app.services.query_builder import (
@@ -20,11 +21,19 @@ from app.sql.setup import ensure_tables_exist, DAILY_TABLES, HOURLY_TABLES
 logger = get_logger(__name__)
 
 INSERT_CHUNK_SIZE = 500
+WRITE_MAX_ATTEMPTS = 2
+
+
+class RunLockNotAcquired(Exception):
+    """Another process is already aggregating this brand's database."""
+
 
 class AggregateRunner:
-    def __init__(self, brand_info: Dict[str, Any], target_dates: List[str]):
+    def __init__(self, brand_info: Dict[str, Any], target_dates: List[str], lock_wait_seconds: int = 0):
         self.brand_info = brand_info
         self.target_dates = target_dates
+        # 0 = don't wait: skip if another run (API trigger / global worker) holds the brand lock.
+        self.lock_wait_seconds = lock_wait_seconds
         self.db_manager = DBManager(
             brand_name=brand_info["brand_name"],
             host=brand_info["host"],
@@ -42,71 +51,86 @@ class AggregateRunner:
         """Ensures that the aggregate tables exist before we try to populate them."""
         ensure_tables_exist(self.db_manager)
 
+    def _write_table(self, table_name: str, columns: List[str], rows: List[Dict[str, Any]], metric_date: str):
+        """DELETE + INSERT in one transaction so readers never see an empty or partial
+        day, with a single commit. Retried only on transient DB errors."""
+        for attempt in range(1, WRITE_MAX_ATTEMPTS + 1):
+            try:
+                self.db_manager.begin()
+                self.db_manager.execute_write(build_delete_query(table_name), (metric_date,))
+                for start in range(0, len(rows), INSERT_CHUNK_SIZE):
+                    chunk = rows[start:start + INSERT_CHUNK_SIZE]
+                    insert_query = build_bulk_insert_query(table_name, columns, len(chunk))
+                    params: List[Any] = []
+                    for row in chunk:
+                        params.extend(row[c] for c in columns)
+                    self.db_manager.execute_write(insert_query, tuple(params))
+                self.db_manager.commit()
+                return
+            except Exception as exc:
+                self.db_manager.rollback()
+                if attempt >= WRITE_MAX_ATTEMPTS or not is_transient_db_error(exc):
+                    raise
+                logger.warning(f"Write to {table_name} failed transiently ({exc}); retrying...")
+                time.sleep(2 * attempt)
+
     def _rebuild_table(
         self,
         table_name: str,
         is_hourly: bool,
         metric_date: str,
+        finest_order_rows: List[Dict[str, Any]],
         session_rows: List[Dict[str, Any]],
     ):
         columns = get_all_columns(table_name, is_hourly)
         dims = get_dimension_columns(table_name, is_hourly)
 
-        # 1. Delete current day's aggregates
-        delete_query = build_delete_query(table_name)
-        self.db_manager.execute_query(delete_query, (metric_date,), commit=True)
-
-        # 2. Orders + sales + payment split + cancel/refund, from MySQL (shopify_orders + returns_fact)
-        start_dt = f"{metric_date} 00:00:00"
-        next_date = (datetime.strptime(metric_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
-        end_dt = f"{next_date} 00:00:00"
-
-        order_rows = self.db_manager.execute_query(
-            build_orders_query(table_name, is_hourly), (start_dt, end_dt), commit=False
-        )
-
-        # 3. Merge orders with the (already-fetched, shared-across-tables) session rows
+        order_rows = UtmMergeService.rollup_orders(finest_order_rows, dims)
         rows = UtmMergeService.merge(dims, metric_date, order_rows, session_rows)
+        self._write_table(table_name, columns, rows, metric_date)
 
-        if not rows:
-            return
-
-        # 4. Bulk insert the merged rows into the aggregate table in chunks.
-        for start in range(0, len(rows), INSERT_CHUNK_SIZE):
-            chunk = rows[start:start + INSERT_CHUNK_SIZE]
-            insert_query = build_bulk_insert_query(table_name, columns, len(chunk))
-            params: List[Any] = []
-            for row in chunk:
-                params.extend(row[c] for c in columns)
-            self.db_manager.execute_query(insert_query, tuple(params), commit=True)
-
-    @retry_db_operation()
     def run_aggregations(self):
         brand_name = self.brand_info["brand_name"]
+        lock_name = DBManager.lock_name(self.brand_info["database"])
+        lock_held = False
 
         try:
+            lock_held = self.db_manager.try_lock(lock_name, self.lock_wait_seconds)
+            if not lock_held:
+                raise RunLockNotAcquired(
+                    f"[{brand_name}] another run holds the aggregation lock (waited {self.lock_wait_seconds}s)"
+                )
+
             for metric_date in self.target_dates:
                 logger.info(f"Starting aggregations for brand: {brand_name}, date: {metric_date}")
 
-                # Sessions/atc_sessions are grouped by utm_source/utm_medium/utm_campaign
-                # (+hour) regardless of which of the 7 daily/7 hourly tables is being
-                # rebuilt, so fetch each granularity from Shopify once per date and
-                # reuse it across all tables of that granularity, instead of re-fetching
-                # (and re-paginating) the same data 7x over.
+                # Shopify first: if it fails we haven't spent any DB time on this date.
+                # Sessions are grouped by utm_source/medium/campaign (+hour) regardless of
+                # which table is being rebuilt, so each granularity is fetched once per date.
                 daily_session_rows = self.sessions_fetcher.fetch_daily_rows(metric_date)
                 hourly_session_rows = self.sessions_fetcher.fetch_hourly_rows(metric_date)
 
+                # One orders/returns query per date; every table below is rolled up from it.
+                start_dt = f"{metric_date} 00:00:00"
+                next_date = (datetime.strptime(metric_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+                end_dt = f"{next_date} 00:00:00"
+                finest_order_rows = self.db_manager.fetch_all(build_orders_query(), (start_dt, end_dt))
+
                 for table_name in DAILY_TABLES:
                     logger.debug(f"Rebuilding {table_name} for date {metric_date}")
-                    self._rebuild_table(table_name, False, metric_date, daily_session_rows)
+                    self._rebuild_table(table_name, False, metric_date, finest_order_rows, daily_session_rows)
 
                 for table_name in HOURLY_TABLES:
                     logger.debug(f"Rebuilding {table_name} for date {metric_date}")
-                    self._rebuild_table(table_name, True, metric_date, hourly_session_rows)
+                    self._rebuild_table(table_name, True, metric_date, finest_order_rows, hourly_session_rows)
 
             logger.info(f"Successfully rebuilt all tables for {brand_name} across {len(self.target_dates)} day(s).")
+        except RunLockNotAcquired:
+            raise
         except Exception as e:
             logger.error(f"Failed to rebuild aggregate tables for {brand_name}: {e}")
             raise e
         finally:
+            if lock_held:
+                self.db_manager.release_lock(lock_name)
             self.db_manager.close()

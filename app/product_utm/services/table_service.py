@@ -16,6 +16,10 @@ from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# Databases whose product_utm tables this (long-lived) process already verified; avoids
+# 2 CREATE TABLE IF NOT EXISTS (metadata locks) per brand every 10-minute cycle.
+_VERIFIED_DATABASES: set[tuple] = set()
+
 
 class TableService:
     def __init__(self, db_client: ProductUTMDBClient, brand_name: str):
@@ -23,8 +27,15 @@ class TableService:
         self.brand_name = brand_name
 
     def ensure_tables_exist(self):
+        database = getattr(self.db_client, "database", None)
+        cache_key = (getattr(self.db_client, "host", None), getattr(self.db_client, "port", None), database)
+        if database is not None and cache_key in _VERIFIED_DATABASES:
+            return
+
         self.db_client.execute(load_query_file("create_product_utm_daily.sql"), commit=True)
         self.db_client.execute(load_query_file("create_product_utm_hourly.sql"), commit=True)
+        if database is not None:
+            _VERIFIED_DATABASES.add(cache_key)
 
     def write_daily_rows(self, start_date: date, end_date: date, rows: list[dict]) -> tuple[int, int]:
         return self._write_rows(

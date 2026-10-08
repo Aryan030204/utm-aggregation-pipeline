@@ -59,10 +59,12 @@ class GraphQLRequestManager:
                         "Fetching Shopify Reports",
                         f"ShopifyQL parse errors: {', '.join(data['parseErrors'])}",
                         retry_count=retry_count,
+                        retryable=False,
                     )
                 return data
             except StageError as exc:
-                if retry_count >= ProductUTMConfig.GRAPHQL_MAX_RETRIES:
+                # A malformed query fails identically every time; retrying only burns API cost.
+                if not exc.retryable or retry_count >= ProductUTMConfig.GRAPHQL_MAX_RETRIES:
                     raise
                 retry_count += 1
                 self.total_retries += 1

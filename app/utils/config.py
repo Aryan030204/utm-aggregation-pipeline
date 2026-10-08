@@ -49,5 +49,11 @@ class Config:
     GLOBAL_RETROSPECTIVE_LOOKBACK_DAYS = int(os.getenv("GLOBAL_RETROSPECTIVE_LOOKBACK_DAYS", "2"))
     MAX_BRAND_RETRIES = int(os.getenv("MAX_BRAND_RETRIES", "3"))
 
-
+    # Load-reduction knobs (safe defaults; 0 disables where noted)
+    # Seconds between rebuilds of dates older than the latest target date on the webhook pipeline. 0 = rebuild every trigger.
+    PRIOR_DAY_REBUILD_INTERVAL_SECONDS = int(os.getenv("PRIOR_DAY_REBUILD_INTERVAL_SECONDS", "3600"))
+    # How long the global retrospective worker waits for a brand's aggregation lock held by another run.
+    GLOBAL_WORKER_LOCK_WAIT_SECONDS = int(os.getenv("GLOBAL_WORKER_LOCK_WAIT_SECONDS", "900"))
+    # TTL for the cached brand list. 0 disables caching.
+    BRANDS_CACHE_TTL_SECONDS = int(os.getenv("BRANDS_CACHE_TTL_SECONDS", "1800"))
 

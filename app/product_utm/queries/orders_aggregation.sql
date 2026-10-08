@@ -12,7 +12,10 @@ SELECT
     SUM(IFNULL(is_refunded, 0)) AS refunded_orders
 FROM (
     SELECT
-        so.*,
+        so.order_id,
+        so.product_id,
+        so.total_price,
+        so.utm_source,
         created_at AS local_created_at,
         IFNULL(r.is_cancelled, 0) AS is_cancelled,
         IFNULL(r.is_refunded, 0) AS is_refunded,

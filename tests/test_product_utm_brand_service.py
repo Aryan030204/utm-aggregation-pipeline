@@ -28,6 +28,9 @@ def encrypt_value(key_text: str, plaintext: str) -> str:
 
 
 class BrandServiceTests(unittest.TestCase):
+    def setUp(self):
+        BrandService.invalidate_cache()
+
     def test_get_active_brands_filters_and_decrypts(self):
         encrypted_password = encrypt_value("awsaesproxykey", "db-secret")
         encrypted_token = encrypt_value("awsaesproxykey", "shopify-token")

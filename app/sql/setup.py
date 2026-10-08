@@ -63,9 +63,18 @@ def get_dimension_columns_and_indexes(table_name: str, is_hourly: bool = False):
         
     return cols_def, idx_def, extra_indexes_sql
 
+# Databases whose tables this process has already verified. The workers are
+# long-lived, so repeating 14 CREATE TABLE IF NOT EXISTS (each takes a metadata
+# lock) per brand per cycle is pure overhead after the first success.
+_VERIFIED_DATABASES: set[tuple] = set()
+
 def ensure_tables_exist(db_manager):
+    cache_key = (db_manager.host, db_manager.port, db_manager.database)
+    if cache_key in _VERIFIED_DATABASES:
+        return
+
     all_tables = [(t, False) for t in DAILY_TABLES] + [(t, True) for t in HOURLY_TABLES]
-    
+
     for table_name, is_hourly in all_tables:
         dims_cols, idx_cols, extra_idx_sql = get_dimension_columns_and_indexes(table_name, is_hourly)
         
@@ -81,4 +90,5 @@ def ensure_tables_exist(db_manager):
         except Exception as e:
             logger.error(f"Failed to create table {table_name}: {e}")
             raise e
+    _VERIFIED_DATABASES.add(cache_key)
     logger.info("All UTM aggregate tables verified/created successfully.")

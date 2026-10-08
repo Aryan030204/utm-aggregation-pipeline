@@ -14,12 +14,21 @@ from app.product_utm.services.merge_service import MergeService
 from app.product_utm.services.shopify_report_service import ShopifyReportService
 from app.product_utm.services.table_service import TableService
 from app.utils.logger import get_logger
+from app.utils.ttl_cache import TTLCache
 
 logger = get_logger(__name__)
 
 
 class ProductUTMWorkerService:
     _debug_brand_selected = False
+    # The ranking (30-day sessions by product) barely moves within an hour, yet the
+    # query ran every 10 minutes per brand. Lives on the class because the service
+    # object is recreated for every run.
+    _top_products_cache = TTLCache(ProductUTMConfig.TOP_PRODUCTS_CACHE_TTL_SECONDS)
+
+    @classmethod
+    def reset_caches(cls) -> None:
+        cls._top_products_cache.invalidate()
 
     def __init__(self, run_type: str, effective_end_date: date, retrospective_days: int | None = None):
         self.run_type = run_type
@@ -50,12 +59,14 @@ class ProductUTMWorkerService:
                 summary.failure_reason = exc.reason
                 summary.retry_count = exc.retry_count
                 metrics.brands_failed += 1
+                BrandService.invalidate_cache()
                 logger.error("[%s] %s", brand.brand_name, exc)
             except Exception as exc:
                 summary.status = "FAILED"
                 summary.stage = summary.stage or "Unknown"
                 summary.failure_reason = str(exc)
                 metrics.brands_failed += 1
+                BrandService.invalidate_cache()
                 logger.error("[%s] Unexpected failure: %s", brand.brand_name, exc)
             finally:
                 summary.execution_time_seconds = round(time.perf_counter() - brand_started_at, 2)
@@ -89,11 +100,7 @@ class ProductUTMWorkerService:
             hourly_start, hourly_end = self._hourly_window()
 
             summary.stage = "Fetching Top Products"
-            top_products = product_repository.fetch_top_products(
-                effective_end_date=self.effective_end_date,
-                lookback_days=ProductUTMConfig.TOP_PRODUCT_LOOKBACK_DAYS,
-                limit=ProductUTMConfig.TOP_PRODUCT_LIMIT,
-            )
+            top_products = self._get_top_products(brand, product_repository)
             summary.top_products_count = len(top_products)
             landing_page_lookup = self._build_landing_page_lookup(top_products, brand.brand_name)
             product_ids = [int(row["product_id"]) for row in top_products if row.get("product_id") is not None]
@@ -149,6 +156,27 @@ class ProductUTMWorkerService:
             metrics.total_throttle_sleep_time += request_manager.total_sleep_seconds
         finally:
             db_client.close()
+
+    def _get_top_products(self, brand, product_repository) -> list[dict]:
+        cache_key = (
+            brand.brand_id,
+            brand.database,
+            self.effective_end_date.isoformat(),
+            ProductUTMConfig.TOP_PRODUCT_LOOKBACK_DAYS,
+            ProductUTMConfig.TOP_PRODUCT_LIMIT,
+        )
+        cached = self._top_products_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        top_products = product_repository.fetch_top_products(
+            effective_end_date=self.effective_end_date,
+            lookback_days=ProductUTMConfig.TOP_PRODUCT_LOOKBACK_DAYS,
+            limit=ProductUTMConfig.TOP_PRODUCT_LIMIT,
+        )
+        if top_products:
+            self._top_products_cache.set(cache_key, top_products)
+        return top_products
 
     def _daily_window(self) -> tuple[date, date]:
         if self.run_type == "retrospective":

@@ -10,7 +10,7 @@ from app.utils.config import Config
 from app.utils.logger import get_logger
 from app.utils.self_scheduler import run_forever
 from app.services.brand_fetcher import BrandFetcher
-from app.services.aggregate_runner import AggregateRunner
+from app.services.aggregate_runner import AggregateRunner, RunLockNotAcquired
 
 logger = get_logger(__name__)
 
@@ -36,12 +36,21 @@ def process_single_brand(brand_info: Dict[str, Any], target_dates: List[str], ma
     for attempt in range(1, max_retries + 1):
         try:
             logger.info(f"[{brand_name}] Attempt {attempt}/{max_retries} starting...")
-            runner = AggregateRunner(brand_info, target_dates)
+            runner = AggregateRunner(
+                brand_info,
+                target_dates,
+                lock_wait_seconds=Config.GLOBAL_WORKER_LOCK_WAIT_SECONDS,
+            )
             runner.initialize()
             runner.run_aggregations()
             elapsed = round(time.perf_counter() - brand_start_time, 2)
             logger.info(f"[{brand_name}] Successfully completed aggregations in {elapsed}s.")
             return (brand_name, True, None)
+        except RunLockNotAcquired as e:
+            # Already waited for the lock; retrying would just wait again.
+            last_exception = e
+            logger.error(f"[{brand_name}] {e}")
+            break
         except Exception as e:
             last_exception = e
             logger.warning(
@@ -54,7 +63,7 @@ def process_single_brand(brand_info: Dict[str, Any], target_dates: List[str], ma
 
     elapsed = round(time.perf_counter() - brand_start_time, 2)
     logger.error(
-        f"[{brand_name}] Exhausted all {max_retries} retries after {elapsed}s. Final error: {last_exception}"
+        f"[{brand_name}] Giving up after {elapsed}s (max retries: {max_retries}). Final error: {last_exception}"
     )
     return (brand_name, False, str(last_exception))
 

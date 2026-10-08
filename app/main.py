@@ -4,12 +4,13 @@ from app.utils.logger import get_logger, get_recent_logs
 from app.utils.config import Config
 from app.models.events import EtlTriggerEvent, ManualTriggerRequest
 from app.services.brand_fetcher import BrandFetcher
-from app.services.aggregate_runner import AggregateRunner
-from app.utils.dates import generate_target_dates
+from app.services.aggregate_runner import AggregateRunner, RunLockNotAcquired
+from app.utils.dates import generate_target_dates, select_dates_to_rebuild, mark_dates_rebuilt
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from datetime import datetime
 import sys
+import threading
 import requests
 import re
 
@@ -26,10 +27,60 @@ def _exception_to_error_code(exc: Exception) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", "_", name).upper()
 
 
+# Single-flight state: a run takes longer than the 10-minute trigger cadence, so
+# concurrent runs would pile up and rewrite the same tables against the shared RDS.
+_state = threading.Condition()
+_running = False
+_pending = False
+
+
 def run_pipeline_task(event: EtlTriggerEvent, is_manual: bool = False, run_id: str | None = None):
     """
-    Background task to execute the pipeline for all brands.
+    Runs the pipeline for all brands, never more than one run at a time. Webhook and
+    scheduled triggers that arrive during a run are coalesced into a single follow-up
+    run (with a fresh completedAt); manual runs wait their turn so their status
+    callbacks stay accurate.
     """
+    global _running, _pending
+    with _state:
+        if _running:
+            if not is_manual:
+                _pending = True
+                logger.info(f"A pipeline run is already in progress; coalescing trigger {event.jobId} into one follow-up run.")
+                return
+            while _running:
+                _state.wait()
+        _running = True
+        _pending = False
+
+    released = False
+    try:
+        current_event, manual, current_run_id = event, is_manual, run_id
+        while True:
+            _execute_pipeline_run(current_event, manual, current_run_id)
+            with _state:
+                if not _pending:
+                    _running = False
+                    released = True
+                    _state.notify_all()
+                    break
+                _pending = False
+            logger.info("Triggers arrived during the run; running once more.")
+            now = datetime.now()
+            current_event = EtlTriggerEvent(
+                eventType="ETL_COMPLETED",
+                jobId=f"coalesced_{now.strftime('%Y%m%d_%H%M%S')}",
+                completedAt=now.strftime("%Y-%m-%dT%H:%M:%S"),
+            )
+            manual, current_run_id = False, None
+    finally:
+        if not released:
+            with _state:
+                _running = False
+                _state.notify_all()
+
+
+def _execute_pipeline_run(event: EtlTriggerEvent, is_manual: bool = False, run_id: str | None = None):
     run_failed = False
     failure_exception = None
     try:
@@ -55,27 +106,36 @@ def run_pipeline_task(event: EtlTriggerEvent, is_manual: bool = False, run_id: s
         target_dates = generate_target_dates(event.completedAt, event.recomputeDays or 2)
         if not target_dates:
             raise PipelineInitializationError("No target dates generated")
-        
+        dates_to_rebuild = select_dates_to_rebuild(target_dates)
+
         # Fetch all valid brands
         brands = BrandFetcher.get_all_brands()
         if not brands:
             raise PipelineInitializationError("No brands fetched")
-            
+
         # Execute pipeline for every brand
+        skipped_brands = 0
         for b in brands:
             try:
                 brand_name = b.get("brand_name", "unknown")
                 logger.info(f"Running aggregates for brand: {brand_name}")
-                
-                runner = AggregateRunner(b, target_dates)
+
+                runner = AggregateRunner(b, dates_to_rebuild)
                 runner.initialize()
                 runner.run_aggregations()
-                
+
+            except RunLockNotAcquired as lock_e:
+                skipped_brands += 1
+                logger.warning(f"Skipping brand {b.get('brand_name')}: {lock_e}")
             except Exception as run_e:
                 run_failed = True
                 if failure_exception is None:
                     failure_exception = run_e
+                BrandFetcher.invalidate_cache()
                 logger.error(f"Failed processing brand {b.get('brand_name')}: {run_e}")
+
+        if not run_failed and not skipped_brands:
+            mark_dates_rebuilt(dates_to_rebuild[:-1])
 
         logger.info(f"Pipeline execution completed for jobId: {event.jobId}")
     except Exception as e:

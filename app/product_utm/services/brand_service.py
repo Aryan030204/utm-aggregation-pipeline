@@ -10,13 +10,35 @@ from Crypto.Util.Padding import unpad
 from app.product_utm.config import ProductUTMConfig
 from app.product_utm.models import BrandContext
 from app.utils.logger import get_logger
+from app.utils.ttl_cache import TTLCache
 
 logger = get_logger(__name__)
 
 
 class BrandService:
+    # 1 list call + 1 detail call per brand on every 10-minute cycle is wasteful for
+    # data that rarely changes. Only non-empty results are cached.
+    _cache = TTLCache(ProductUTMConfig.BRANDS_CACHE_TTL_SECONDS)
+    _CACHE_KEY = "active_brands"
+
+    @staticmethod
+    def invalidate_cache() -> None:
+        """Drop the cached brand list, e.g. after a brand run fails (rotated token/credentials)."""
+        BrandService._cache.invalidate()
+
     @staticmethod
     def get_active_brands() -> list[BrandContext]:
+        cached = BrandService._cache.get(BrandService._CACHE_KEY)
+        if cached is not None:
+            return list(cached)
+
+        brands = BrandService._fetch_active_brands()
+        if brands:
+            BrandService._cache.set(BrandService._CACHE_KEY, brands)
+        return list(brands)
+
+    @staticmethod
+    def _fetch_active_brands() -> list[BrandContext]:
         headers = {"x-pipeline-key": ProductUTMConfig.PIPELINE_AUTH_HEADER}
         response = requests.get(ProductUTMConfig.GET_BRANDS_API, headers=headers, timeout=30)
         response.raise_for_status()

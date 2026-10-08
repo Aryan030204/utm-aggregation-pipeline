@@ -17,6 +17,9 @@ class MockResponse:
 
 
 class BrandFetcherTests(unittest.TestCase):
+    def setUp(self):
+        BrandFetcher.invalidate_cache()
+
     def test_get_brands_from_api_only_includes_literal_true_is_active(self):
         brands_map = {
             "1": "Active Brand",
@@ -85,6 +88,10 @@ class BrandFetcherTests(unittest.TestCase):
                     "password": "pw-1",
                     "database": "db-1",
                     "port": 3307,
+                    "access_token": "",
+                    "shop_name": "",
+                    "api_version": "2025-10",
+                    "store_timezone": "UTC",
                 }
             ],
         )
@@ -139,6 +146,10 @@ class BrandFetcherTests(unittest.TestCase):
                     "password": "env-pw-a",
                     "database": "env-db-a",
                     "port": 3311,
+                    "access_token": "",
+                    "shop_name": "",
+                    "api_version": "2025-10",
+                    "store_timezone": "UTC",
                 },
                 {
                     "brand_id": "11",
@@ -148,6 +159,10 @@ class BrandFetcherTests(unittest.TestCase):
                     "password": "env-pw-b",
                     "database": "env-db-b",
                     "port": 3312,
+                    "access_token": "",
+                    "shop_name": "",
+                    "api_version": "2025-10",
+                    "store_timezone": "UTC",
                 },
             ],
         )

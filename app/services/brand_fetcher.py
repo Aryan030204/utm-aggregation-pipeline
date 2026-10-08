@@ -7,6 +7,7 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 from app.utils.config import Config
 from app.utils.logger import get_logger
+from app.utils.ttl_cache import TTLCache
 
 logger = get_logger(__name__)
 
@@ -31,20 +32,35 @@ def decrypt_password(encrypted_str: str) -> str:
         return encrypted_str
 
 class BrandFetcher:
+    # Brand config rarely changes, but every run used to cost 1 list call + 1 detail
+    # call per brand. Only the raw fetch is cached (never an empty/failed one), so
+    # the backfill filter below still applies on every call.
+    _cache = TTLCache(Config.BRANDS_CACHE_TTL_SECONDS)
+
+    @staticmethod
+    def invalidate_cache() -> None:
+        """Drop the cached brand list, e.g. after a brand run fails (rotated token/credentials)."""
+        BrandFetcher._cache.invalidate()
+
     @staticmethod
     def get_all_brands() -> List[Dict[str, Any]]:
         """
         Returns a list of dicts. Each dict contains at least:
         brand_name, host, user, password, database, port
         """
-        if Config.TEST_MODE:
-            logger.info("TEST_MODE is true. Fetching credentials from .env.local variables.")
-            brands = BrandFetcher._get_brands_from_env()
-        else:
-            logger.info(f"TEST_MODE is false. Fetching from API: {Config.GET_BRANDS_API}")
-            brands = BrandFetcher._get_brands_from_api()
+        cache_key = "env" if Config.TEST_MODE else "api"
+        brands = BrandFetcher._cache.get(cache_key)
+        if brands is None:
+            if Config.TEST_MODE:
+                logger.info("TEST_MODE is true. Fetching credentials from .env.local variables.")
+                brands = BrandFetcher._get_brands_from_env()
+            else:
+                logger.info(f"TEST_MODE is false. Fetching from API: {Config.GET_BRANDS_API}")
+                brands = BrandFetcher._get_brands_from_api()
+            if brands:
+                BrandFetcher._cache.set(cache_key, brands)
 
-        return BrandFetcher._filter_backfill_brand_indices(brands)
+        return BrandFetcher._filter_backfill_brand_indices(list(brands))
 
     @staticmethod
     def _filter_backfill_brand_indices(brands: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
