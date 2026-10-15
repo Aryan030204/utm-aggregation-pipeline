@@ -8,11 +8,15 @@ from mysql.connector import Error
 
 from app.product_utm.config import ProductUTMConfig
 from app.utils.logger import get_logger
+from app.utils.replica_reader import ReplicaReader, HEARTBEAT_UPSERT
 
 logger = get_logger(__name__)
 
 
 class ProductUTMDBClient:
+    """Writer connection for writes/DDL; fetch_all() (reads only) is served by the read replica
+    when DB_READ_REPLICA_HOST is set."""
+
     def __init__(self, brand_name: str, host: str, user: str, password: str, database: str, port: int = 3306):
         self.brand_name = brand_name
         self.host = host
@@ -21,6 +25,7 @@ class ProductUTMDBClient:
         self.database = database
         self.port = port
         self.connection = None
+        self.replica = ReplicaReader(brand_name, user, password, database, write_heartbeat=self._write_heartbeat)
 
     def connect(self):
         if self.connection and self.connection.is_connected():
@@ -37,10 +42,17 @@ class ProductUTMDBClient:
         return self.connection
 
     def close(self):
+        self.replica.close()
         if self.connection and self.connection.is_connected():
             self.connection.close()
 
     def fetch_all(self, query: str, params: tuple[Any, ...] | None = None) -> list[dict[str, Any]]:
+        return self.replica.read(query, params, self._fetch_all_from_writer)
+
+    def _write_heartbeat(self, token: int) -> None:
+        self.execute(HEARTBEAT_UPSERT, (token,), commit=True)
+
+    def _fetch_all_from_writer(self, query: str, params: tuple[Any, ...] | None = None) -> list[dict[str, Any]]:
         connection = self.connect()
         cursor = connection.cursor(dictionary=True)
         try:

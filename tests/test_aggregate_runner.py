@@ -27,7 +27,7 @@ class FakeDB:
     def release_lock(self, name):
         self.events.append(("unlock",))
 
-    def fetch_all(self, query, params=None):
+    def read_all(self, query, params=None):
         self.events.append(("orders_query", params))
         return [{
             "metric_date": "d", "metric_hour": 9, "utm_source": "google", "utm_medium": "cpc",

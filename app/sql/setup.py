@@ -1,4 +1,5 @@
 from app.utils.logger import get_logger
+from app.utils.replica_reader import HEARTBEAT_DDL
 
 logger = get_logger(__name__)
 
@@ -90,5 +91,6 @@ def ensure_tables_exist(db_manager):
         except Exception as e:
             logger.error(f"Failed to create table {table_name}: {e}")
             raise e
+    db_manager.execute_query(HEARTBEAT_DDL, commit=True)
     _VERIFIED_DATABASES.add(cache_key)
     logger.info("All UTM aggregate tables verified/created successfully.")

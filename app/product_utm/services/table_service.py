@@ -13,6 +13,7 @@ from app.product_utm.db import (
 )
 from app.product_utm.models import StageError
 from app.utils.logger import get_logger
+from app.utils.replica_reader import HEARTBEAT_DDL
 
 logger = get_logger(__name__)
 
@@ -34,6 +35,7 @@ class TableService:
 
         self.db_client.execute(load_query_file("create_product_utm_daily.sql"), commit=True)
         self.db_client.execute(load_query_file("create_product_utm_hourly.sql"), commit=True)
+        self.db_client.execute(HEARTBEAT_DDL, commit=True)
         if database is not None:
             _VERIFIED_DATABASES.add(cache_key)
 

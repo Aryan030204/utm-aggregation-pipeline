@@ -114,7 +114,7 @@ class AggregateRunner:
                 start_dt = f"{metric_date} 00:00:00"
                 next_date = (datetime.strptime(metric_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
                 end_dt = f"{next_date} 00:00:00"
-                finest_order_rows = self.db_manager.fetch_all(build_orders_query(), (start_dt, end_dt))
+                finest_order_rows = self.db_manager.read_all(build_orders_query(), (start_dt, end_dt))
 
                 for table_name in DAILY_TABLES:
                     logger.debug(f"Rebuilding {table_name} for date {metric_date}")

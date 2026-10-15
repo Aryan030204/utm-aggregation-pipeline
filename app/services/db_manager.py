@@ -3,10 +3,13 @@ import hashlib
 import mysql.connector
 from mysql.connector import Error
 from app.utils.logger import get_logger
+from app.utils.replica_reader import ReplicaReader, HEARTBEAT_UPSERT
 
 logger = get_logger(__name__)
 
 class DBManager:
+    """Writer connection (DDL, locks, DELETE/INSERT) plus an optional read-replica reader for read_all()."""
+
     def __init__(self, brand_name: str, host: str, user: str, password: str, database: str, port: int = 3306):
         self.brand = brand_name
         self.host = host
@@ -15,6 +18,7 @@ class DBManager:
         self.password = password
         self.database = database
         self.connection = None
+        self.replica = ReplicaReader(brand_name, user, password, database, write_heartbeat=self._write_heartbeat)
 
     def connect(self):
         try:
@@ -34,8 +38,23 @@ class DBManager:
             raise e
 
     def close(self):
+        self.replica.close()
         if self.connection and self.connection.is_connected():
             self.connection.close()
+
+    def read_all(self, query: str, params: tuple = None):
+        """Read query for the pipeline's source tables: served by the read replica when
+        DB_READ_REPLICA_HOST is set, otherwise (or on fallback) by the writer."""
+        return self.replica.read(query, params, self.fetch_all)
+
+    def _write_heartbeat(self, token: int) -> None:
+        self._ensure_connected()
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute(HEARTBEAT_UPSERT, (token,))
+        finally:
+            cursor.close()
+        self.connection.commit()
 
     def _ensure_connected(self):
         if not self.connection or not self.connection.is_connected():
