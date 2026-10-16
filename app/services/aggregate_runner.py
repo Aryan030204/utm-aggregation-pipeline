@@ -111,10 +111,9 @@ class AggregateRunner:
                 hourly_session_rows = self.sessions_fetcher.fetch_hourly_rows(metric_date)
 
                 # One orders/returns query per date; every table below is rolled up from it.
-                start_dt = f"{metric_date} 00:00:00"
+                # Plain dates (not datetimes): the query filters on the indexed created_dt column.
                 next_date = (datetime.strptime(metric_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
-                end_dt = f"{next_date} 00:00:00"
-                finest_order_rows = self.db_manager.read_all(build_orders_query(), (start_dt, end_dt))
+                finest_order_rows = self.db_manager.read_all(build_orders_query(), (metric_date, next_date))
 
                 for table_name in DAILY_TABLES:
                     logger.debug(f"Rebuilding {table_name} for date {metric_date}")

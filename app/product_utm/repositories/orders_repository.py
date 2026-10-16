@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
 from app.product_utm.db import ProductUTMDBClient, load_query_file
@@ -69,8 +69,8 @@ class OrdersRepository:
     def _fetch_hourly_aggregates(
         self,
         product_ids: list[int],
-        local_start: datetime,
-        local_end: datetime,
+        local_start: date,
+        local_end: date,
     ) -> list[dict]:
         return self._execute_aggregate_query(
             "DATE(local_created_at) AS date",
@@ -87,8 +87,8 @@ class OrdersRepository:
         extra_select: str,
         group_by_prefix: str,
         product_ids: list[int],
-        local_start: datetime,
-        local_end: datetime,
+        local_start: date,
+        local_end: date,
     ) -> list[dict]:
         placeholders = ", ".join(["%s"] * len(product_ids))
         query = self.template.format(
@@ -97,22 +97,19 @@ class OrdersRepository:
             group_by_prefix=group_by_prefix,
             product_placeholders=placeholders,
         )
+        # Whole-day window as plain dates: the query filters on the indexed created_dt column
+        # (created_at has no index, so filtering on it scans the entire shopify_orders table).
         params = (
-            self._to_mysql_datetime(local_start),
-            self._to_mysql_datetime(local_end),
+            local_start.isoformat(),
+            local_end.isoformat(),
             *product_ids,
         )
         return self.db_client.fetch_all(query, params)
 
     @staticmethod
-    def _compute_local_window(start_date: date, end_date: date) -> tuple[datetime, datetime]:
-        local_start = datetime.combine(start_date, time.min)
-        local_end = datetime.combine(end_date + timedelta(days=1), time.min)
-        return local_start, local_end
-
-    @staticmethod
-    def _to_mysql_datetime(value: datetime) -> str:
-        return value.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+    def _compute_local_window(start_date: date, end_date: date) -> tuple[date, date]:
+        """[start_date, end_date + 1 day) -- half-open, in whole days."""
+        return start_date, end_date + timedelta(days=1)
 
     @staticmethod
     def _normalize_date(value: object) -> str:

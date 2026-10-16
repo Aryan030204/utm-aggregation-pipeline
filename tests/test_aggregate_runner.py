@@ -91,6 +91,19 @@ class RunAggregationsTests(unittest.TestCase):
         first_tx = events[events.index(("begin",)):events.index(("commit",)) + 1]
         self.assertEqual(first_tx, [("begin",), ("write", "DELETE"), ("write", "INSERT"), ("commit",)])
 
+    def test_orders_query_is_called_with_plain_dates_for_the_indexed_window(self):
+        events = []
+        make_runner(events, dates=("2026-09-19", "2026-09-20")).run_aggregations()
+        self.assertEqual([e[1] for e in events if e[0] == "orders_query"],
+                         [("2026-09-19", "2026-09-20"), ("2026-09-20", "2026-09-21")])
+
+    def test_orders_sql_filters_on_created_dt_not_the_unindexed_created_at(self):
+        from app.services.query_builder import build_orders_query
+        sql = build_orders_query()
+        self.assertIn("WHERE created_dt >= %s AND created_dt < %s", sql)
+        self.assertNotIn("created_at >=", sql)
+        self.assertNotIn("created_at <", sql)
+
     def test_shopify_is_fetched_before_the_database_is_queried(self):
         events = []
         make_runner(events, dates=("2026-09-20",)).run_aggregations()

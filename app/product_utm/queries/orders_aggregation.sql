@@ -38,8 +38,8 @@ FROM (
         FROM returns_fact
         GROUP BY order_id
     ) r ON so.order_id = r.order_id
-    WHERE so.created_at >= %s
-      AND so.created_at < %s
+    WHERE so.created_dt >= %s
+      AND so.created_dt < %s
       AND product_id IN ({product_placeholders})
 ) scoped_orders
 GROUP BY {group_by_prefix}, product_id, utm_source

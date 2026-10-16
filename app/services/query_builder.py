@@ -34,12 +34,18 @@ def build_delete_query(table_name: str) -> str:
 
 def build_orders_query() -> str:
     """Orders + sales + payment-type split + cancel/refund counts at the finest grain
-    (date, hour, source, medium, campaign), for one [start, end) created_at window.
+    (date, hour, source, medium, campaign), for the whole days in [start_date, end_date).
+    Parameters are two plain dates (YYYY-MM-DD).
     Every aggregate table is derived from these rows in Python (see
     UtmMergeService.rollup_orders), so this runs once per date instead of once per
     table. Every column is additive across buckets, including orders: an order
     carries a single created_at and UTM set, so it lands in exactly one bucket.
     Sessions/atc_sessions come from Shopify GraphQL (ShopifySessionsFetcher)."""
+    # The date filter must use created_dt (a STORED generated column = DATE(created_at)
+    # with several indexes leading on it). shopify_orders has NO index on created_at, so
+    # filtering on created_at is a full scan of the whole table (~1.4 GB for the largest
+    # brand) on every call, which is what drained the replica's EBS byte balance.
+    #
     # GROUP BY repeats the expressions instead of using the aliases: for GROUP BY,
     # MySQL resolves a name to the FROM-clause column before the select alias, which
     # would group on the raw (NULL-able) utm columns rather than the filled-in values.
@@ -61,7 +67,7 @@ def build_orders_query() -> str:
         SELECT order_id, created_at, total_price, utm_source, utm_medium, utm_campaign,
                ({PAYMENT_TYPE_CASE_SQL}) AS payment_type
         FROM shopify_orders
-        WHERE created_at >= %s AND created_at < %s
+        WHERE created_dt >= %s AND created_dt < %s
     ) so
     LEFT JOIN (
         SELECT order_id,
