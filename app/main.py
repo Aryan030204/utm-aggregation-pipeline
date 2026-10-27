@@ -8,7 +8,8 @@ from app.services.aggregate_runner import AggregateRunner, RunLockNotAcquired
 from app.utils.dates import generate_target_dates, select_dates_to_rebuild, mark_dates_rebuilt
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from datetime import datetime
+from datetime import datetime, timedelta
+import os
 import sys
 import threading
 import requests
@@ -290,10 +291,23 @@ def main():
         )
         scheduler.start()
 
-        # Run once immediately on startup so a container reboot/rebuild doesn't have
-        # to wait for the next cron tick, matching the other self-scheduled workers.
-        logger.info("Running pipeline once immediately on startup...")
-        scheduled_job()
+        # One catch-up run shortly after startup so a container reboot/rebuild doesn't have to wait for
+        # the next trigger. It is delayed (STARTUP_DELAY_SECONDS, set per container in docker-compose)
+        # so a host restart doesn't start every pipeline at once, and it can be switched off with
+        # UTM_RUN_ON_STARTUP=false because every completed ETL run also triggers this pipeline.
+        if os.getenv("UTM_RUN_ON_STARTUP", "true").strip().lower() == "true":
+            from app.utils.self_scheduler import startup_delay_seconds
+
+            delay = startup_delay_seconds()
+            logger.info(f"Running pipeline once on startup in {delay}s...")
+            scheduler.add_job(
+                scheduled_job,
+                "date",
+                run_date=datetime.now() + timedelta(seconds=delay),
+                id="utm_pipeline_startup_job",
+            )
+        else:
+            logger.info("UTM_RUN_ON_STARTUP=false: no startup run.")
     else:
         logger.info("SELF_RUN is disabled. Pipeline will only run via manual triggers.")
 

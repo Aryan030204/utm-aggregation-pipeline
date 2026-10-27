@@ -45,7 +45,7 @@ class Config:
     PIPELINE_ID = os.getenv("PIPELINE_ID", "")
 
     # Global Retrospective Worker Settings
-    GLOBAL_RETROSPECTIVE_CRON = os.getenv("GLOBAL_RETROSPECTIVE_CRON", "35 18 * * *")  # Default: 00:05 AM IST / 18:35 UTC
+    GLOBAL_RETROSPECTIVE_CRON = os.getenv("GLOBAL_RETROSPECTIVE_CRON", "57 18 * * *")  # Default: 00:27 AM IST / 18:57 UTC (was 00:05, moved off the midnight cluster)
     GLOBAL_RETROSPECTIVE_LOOKBACK_DAYS = int(os.getenv("GLOBAL_RETROSPECTIVE_LOOKBACK_DAYS", "2"))
     MAX_BRAND_RETRIES = int(os.getenv("MAX_BRAND_RETRIES", "3"))
 

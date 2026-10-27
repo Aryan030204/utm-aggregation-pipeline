@@ -5,6 +5,19 @@ services:
     container_name: utm-aggregate-pipeline
     command: ["python", "-m", "app.main"]
     env_file: .env
+    environment:
+      STARTUP_DELAY_SECONDS: ${UTM_API_STARTUP_DELAY_S:-270}
+    # Resource isolation for the shared 4 GiB host: no swap spill (memswap_limit == mem_limit),
+    # a CPU ceiling and a PID cap. Startup runs are staggered across the four UTM containers.
+    mem_limit: ${UTM_API_MEM_LIMIT:-512m}
+    memswap_limit: ${UTM_API_MEM_LIMIT:-512m}
+    cpus: ${UTM_API_CPUS:-1.0}
+    pids_limit: 256
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     ports:
       - "8000:8000"
     restart: unless-stopped
@@ -17,6 +30,17 @@ services:
     image: daily-product-utm-worker:latest
     command: ["python", "-m", "app.workers.daily_product_utm_worker"]
     env_file: .env
+    environment:
+      STARTUP_DELAY_SECONDS: ${UTM_DAILY_STARTUP_DELAY_S:-330}
+    mem_limit: ${UTM_DAILY_WORKER_MEM_LIMIT:-384m}
+    memswap_limit: ${UTM_DAILY_WORKER_MEM_LIMIT:-384m}
+    cpus: ${UTM_DAILY_WORKER_CPUS:-0.5}
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     restart: unless-stopped
 
   retrospective-product-utm-worker:
@@ -24,6 +48,17 @@ services:
     image: retrospective-product-utm-worker:latest
     command: ["python", "-m", "app.workers.retrospective_product_utm_worker"]
     env_file: .env
+    environment:
+      STARTUP_DELAY_SECONDS: ${UTM_RETRO_STARTUP_DELAY_S:-390}
+    mem_limit: ${UTM_RETRO_WORKER_MEM_LIMIT:-384m}
+    memswap_limit: ${UTM_RETRO_WORKER_MEM_LIMIT:-384m}
+    cpus: ${UTM_RETRO_WORKER_CPUS:-0.5}
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     restart: unless-stopped
 
   global-utm-retrospective-worker:
@@ -31,6 +66,20 @@ services:
     image: global-utm-retrospective-worker:latest
     command: ["python", "-m", "app.workers.global_utm_retrospective_worker"]
     env_file: .env
+    environment:
+      STARTUP_DELAY_SECONDS: ${UTM_GLOBAL_STARTUP_DELAY_S:-450}
+      # 00:27 IST (18:57 UTC) instead of the .env value 35 18 (00:05 IST), to leave the midnight cluster.
+      # Own variable name on purpose: compose also reads .env for ${...}, which still holds the old cron.
+      GLOBAL_RETROSPECTIVE_CRON: ${UTM_GLOBAL_RETRO_CRON:-57 18 * * *}
+    mem_limit: ${UTM_GLOBAL_WORKER_MEM_LIMIT:-384m}
+    memswap_limit: ${UTM_GLOBAL_WORKER_MEM_LIMIT:-384m}
+    cpus: ${UTM_GLOBAL_WORKER_CPUS:-0.5}
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     restart: unless-stopped
 
 networks:
